@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=400, initial-scale=1.0">
+    <title>Page Agent</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+    <div class="popup-container">
+        <!-- Header -->
+        <header class="popup-header">
+            <div class="logo">
+                <span class="logo-icon">🤖</span>
+                <span class="logo-text">Page Agent</span>
+            </div>
+            <button class="settings-btn" id="settingsBtn" title="设置">⚙️</button>
+        </header>
+
+        <!-- Status Banner -->
+        <div class="status-banner" id="statusBanner">
+            <span class="status-icon" id="statusIcon">✨</span>
+            <span class="status-text" id="statusText">准备就绪</span>
+        </div>
+
+        <!-- Task Input -->
+        <div class="task-section">
+            <label for="taskInput" class="task-label">输入任务指令</label>
+            <textarea id="taskInput" class="task-input" placeholder="例如：搜索 Page Agent 项目&#10;或：点击登录按钮并输入用户名 admin"
+                rows="3"></textarea>
+            <div class="task-actions">
+                <button class="btn btn-primary" id="executeBtn">
+                    <span class="btn-icon">▶️</span>
+                    执行
+                </button>
+                <button class="btn btn-danger hidden" id="stopBtn">
+                    <span class="btn-icon">⏹️</span>
+                    停止
+                </button>
+            </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="progress-section hidden" id="progressSection">
+            <div class="progress-header">
+                <span class="progress-step" id="progressStep">步骤 1/20</span>
+                <button class="pause-btn" id="pauseBtn" title="暂停">⏸️</button>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-detail" id="progressDetail">
+                <div class="detail-item">
+                    <span class="detail-label">🎯 目标</span>
+                    <span class="detail-value" id="nextGoal">分析页面...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Section -->
+        <div class="result-section hidden" id="resultSection">
+            <div class="result-header">
+                <span class="result-icon" id="resultIcon">✅</span>
+                <span class="result-title" id="resultTitle">任务完成</span>
+            </div>
+            <div class="result-content" id="resultContent">
+                任务执行结果将显示在这里
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+            <button class="quick-btn" id="clearHistoryBtn" title="清除历史">🗑️</button>
+            <button class="quick-btn" id="refreshBtn" title="刷新页面状态">🔄</button>
+        </div>
+
+        <!-- Footer -->
+        <footer class="popup-footer">
+            <span class="config-status" id="configStatus">
+                <span class="config-dot"></span>
+                使用默认配置
+            </span>
+        </footer>
+    </div>
+
+    <script type="module" src="./popup.ts"></script>
+</body>
+
+</html>

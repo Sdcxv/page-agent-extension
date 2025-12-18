@@ -1,0 +1,25 @@
+{
+    "name": "page-agent-extension",
+    "version": "1.0.0",
+    "description": "Page Agent Chrome Extension - AI-powered GUI agent for web applications",
+    "type": "module",
+    "scripts": {
+        "dev": "vite build --watch",
+        "build": "tsc && vite build",
+        "build:prod": "tsc && vite build --mode production",
+        "typecheck": "tsc --noEmit",
+        "clean": "rm -rf dist"
+    },
+    "devDependencies": {
+        "@crxjs/vite-plugin": "^2.0.0-beta.25",
+        "@types/chrome": "^0.0.268",
+        "@types/node": "^25.0.3",
+        "typescript": "^5.4.2",
+        "vite": "^5.4.11"
+    },
+    "dependencies": {
+        "ai-motion": "^0.4.7",
+        "zod": "^3.23.8",
+        "zod-to-json-schema": "^3.25.0"
+    }
+}
