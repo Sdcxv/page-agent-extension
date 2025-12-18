@@ -63,6 +63,12 @@ export interface AgentConfig {
 	onAfterStep?: (this: PageAgent, stepCnt: number, history: AgentHistory[]) => Promise<void> | void
 	onBeforeTask?: (this: PageAgent) => Promise<void> | void
 	onAfterTask?: (this: PageAgent, result: ExecutionResult) => Promise<void> | void
+	onStatusChange?: (this: PageAgent, status: string) => void
+
+	/**
+	 * History to resume from after navigation
+	 */
+	initialHistory?: AgentHistory[]
 
 	/**
 	 * @note this hook can block the disposal process

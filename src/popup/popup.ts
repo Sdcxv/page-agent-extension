@@ -37,6 +37,7 @@ const elements = {
 
     // Footer
     configStatus: document.getElementById('configStatus') as HTMLSpanElement,
+    modeToggle: document.getElementById('modeToggle') as HTMLButtonElement,
 }
 
 let isRunning = false
@@ -49,16 +50,80 @@ async function init() {
     await getCurrentTab()
     setupEventListeners()
     loadSavedTask()
+    await queryBackgroundStatus()
+}
+
+// Query background for existing task on current tab
+async function queryBackgroundStatus() {
+    if (!currentTabId) return
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            type: MESSAGE_TYPES.GET_STATUS,
+            payload: { tabId: currentTabId }
+        })
+
+        if (response?.active && response.task) {
+            console.log('[Popup] Resuming UI for active task:', response.task)
+            isRunning = true
+            elements.taskInput.value = response.task.task
+            updateStatus('正在执行 (已恢复)...', 'running')
+            showProgress()
+            elements.executeBtn.classList.add('hidden')
+            elements.stopBtn.classList.remove('hidden')
+
+            // If we have history, show progress based on it
+            if (response.task.history?.length > 0) {
+                const history = response.task.history
+                const lastStep = history[history.length - 1]
+                updateProgress({
+                    step: history.length,
+                    maxSteps: 20,
+                    brain: {
+                        nextGoal: lastStep.brain?.next_goal || '继续执行...'
+                    }
+                } as any)
+            }
+        } else {
+            console.log('[Popup] No active task for this tab')
+            isRunning = false
+            updateStatus('准备就绪', 'ready')
+            hideProgress()
+            elements.executeBtn.classList.remove('hidden')
+            elements.stopBtn.classList.add('hidden')
+        }
+    } catch (err) {
+        console.error('[Popup] Failed to query background status:', err)
+    }
 }
 
 // Check if using default or custom config
 async function checkConfigStatus() {
+    const { getConfig } = await import('../lib/storage')
+    const config = await getConfig()
     const isDefault = await isUsingDefaultConfig()
+
     if (isDefault) {
         elements.configStatus.textContent = '使用默认配置'
     } else {
         elements.configStatus.classList.add('custom')
         elements.configStatus.innerHTML = '<span class="config-dot"></span>自定义配置'
+    }
+
+    const mode = config.ui.interactionMode || 'debugger'
+    const modeIcon = elements.modeToggle.querySelector('.mode-icon') as HTMLElement
+    const modeText = elements.modeToggle.querySelector('.mode-text') as HTMLElement
+
+    if (mode === 'debugger') {
+        elements.modeToggle.className = 'mode-toggle debugger'
+        modeIcon.textContent = '⚡'
+        modeText.textContent = '增强模式'
+        elements.modeToggle.title = '当前：增强模式 (利用 CDP 实现物理点击)'
+    } else {
+        elements.modeToggle.className = 'mode-toggle simulated'
+        modeIcon.textContent = '🛡️'
+        modeText.textContent = '兼容模式'
+        elements.modeToggle.title = '当前：兼容模式 (传统模拟点击)'
     }
 }
 
@@ -70,7 +135,12 @@ async function getCurrentTab() {
     // Check if we can run on this tab
     if (tab?.url?.startsWith('chrome://') || tab?.url?.startsWith('chrome-extension://') || tab?.url?.includes('chrome.google.com/webstore')) {
         console.warn('[Popup] Restricted page detected:', tab.url)
-        // We might want to show a warning in the UI
+        updateStatus('受限页面 (无法运行)', 'warning')
+        elements.executeBtn.disabled = true
+        elements.executeBtn.title = '此页面受浏览器安全限制，无法运行插件'
+    } else {
+        elements.executeBtn.disabled = false
+        elements.executeBtn.title = ''
     }
 }
 
@@ -103,6 +173,9 @@ function setupEventListeners() {
         }
     })
 
+    // Mode toggle
+    elements.modeToggle.addEventListener('click', toggleInteractionMode)
+
     // Save task input on change
     elements.taskInput.addEventListener('input', () => {
         localStorage.setItem('lastTask', elements.taskInput.value)
@@ -110,6 +183,25 @@ function setupEventListeners() {
 
     // Listen for messages from content script
     chrome.runtime.onMessage.addListener(handleMessage)
+}
+
+// Toggle interaction mode
+async function toggleInteractionMode() {
+    const { getConfig, saveConfig } = await import('../lib/storage')
+    const config = await getConfig()
+    const newMode = config.ui.interactionMode === 'debugger' ? 'simulated' : 'debugger'
+
+    config.ui.interactionMode = newMode
+    await saveConfig(config)
+    await checkConfigStatus()
+
+    // If a task is running, notify content script (optional, but good for UX)
+    if (isRunning && currentTabId) {
+        chrome.tabs.sendMessage(currentTabId, {
+            type: MESSAGE_TYPES.CONFIG_UPDATED,
+            payload: { interactionMode: newMode }
+        }).catch(() => { })
+    }
 }
 
 // Load saved task from localStorage
@@ -134,13 +226,30 @@ async function executeTask() {
     }
 
     try {
-        // Check connectivity first
+        // Check if current page is restricted
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        const url = tab?.url || ''
+        if (url.startsWith('chrome://') || url.startsWith('chrome-extension://') || url.includes('chrome.google.com/webstore')) {
+            throw new Error('Cannot run on this page')
+        }
+
+        // Check connectivity with a simple retry
         console.log('[Popup] Checking connectivity with tab:', currentTabId)
-        try {
-            const pong = await chrome.tabs.sendMessage(currentTabId, { type: 'PING' })
-            console.log('[Popup] Received PING response:', pong)
-        } catch (e) {
-            console.error('[Popup] Connectivity check failed:', e)
+        let connected = false
+        for (let i = 0; i < 3; i++) {
+            try {
+                const response = await chrome.tabs.sendMessage(currentTabId, { type: 'PING' })
+                if (response?.pong) {
+                    connected = true
+                    break
+                }
+            } catch (e) {
+                console.warn(`[Popup] Connectivity attempt ${i + 1} failed:`, e)
+                if (i < 2) await new Promise(r => setTimeout(r, 300))
+            }
+        }
+
+        if (!connected) {
             throw new Error('Could not establish connection')
         }
 
@@ -163,25 +272,33 @@ async function executeTask() {
         console.error('Failed to execute task:', error)
 
         let errorMessage = error.message || '未知错误'
-        if (errorMessage.includes('Could not establish connection')) {
-            errorMessage = '连接失败：请刷新页面后重试'
-        } else if (errorMessage.includes('Cannot run on this page')) {
-            errorMessage = '无法在该页面运行：请尝试其他网页'
+
+        // Handle specific BFCache error from Chrome
+        if (errorMessage.includes('back/forward cache')) {
+            console.log('[Popup] Suppressing BFCache error as content script should resume automatically')
+            updateStatus('正在同步状态...', 'running')
+            return
         }
 
-        updateStatus('执行失败', 'error')
+        if (errorMessage.includes('Could not establish connection')) {
+            errorMessage = '连接失败：请尝试刷新页面。如果页面正在加载，请稍候再试。'
+        } else if (errorMessage.includes('Cannot run on this page')) {
+            errorMessage = '该页面受浏览器安全限制（如 Chrome 设置页或商店），Agent 无法在此运行。请尝试其他普通网页。'
+        }
+
+        updateStatus('启动失败', 'error')
 
         // Show detailed error in result section
         elements.resultSection.classList.remove('hidden')
-        elements.resultIcon.textContent = '❌'
+        elements.resultIcon.textContent = '⚠️'
         elements.resultTitle.textContent = '启动失败'
         elements.resultContent.innerHTML = `
             <p>${errorMessage}</p>
             <p style="margin-top: 8px; font-size: 0.9em; color: #666;">
-                建议：<br>
-                1. 刷新当前网页<br>
-                2. 确保页面已加载完成<br>
-                3. 检查是否在受支持的网页上运行
+                常见原因：<br>
+                1. 页面尚未完全加载（请刷新或等待）<br>
+                2. 页面是浏览器内部页面（无法注入脚本）<br>
+                3. 扩展程序刚刚更新（需要刷新页面重连）
             </p>
         `
     }
@@ -228,6 +345,7 @@ async function togglePause() {
 function handleMessage(message: any) {
     switch (message.type) {
         case MESSAGE_TYPES.TASK_PROGRESS:
+            ensureRunningState()
             updateProgress(message as TaskProgressMessage)
             break
 
@@ -238,6 +356,26 @@ function handleMessage(message: any) {
         case MESSAGE_TYPES.TASK_ERROR:
             handleTaskError(message)
             break
+
+        case (MESSAGE_TYPES as any).TASK_THINKING:
+            ensureRunningState()
+            updateStatus(message.status, 'running')
+            break
+    }
+}
+
+/**
+ * Ensures the UI reflects a running state. 
+ * Useful for recovering from transient "Start Failed" UI errors 
+ * when the script is actually running.
+ */
+function ensureRunningState() {
+    if (!isRunning) {
+        isRunning = true
+        showProgress()
+        elements.executeBtn.classList.add('hidden')
+        elements.stopBtn.classList.remove('hidden')
+        elements.resultSection.classList.add('hidden')
     }
 }
 

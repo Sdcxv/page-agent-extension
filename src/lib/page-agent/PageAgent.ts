@@ -1,10 +1,10 @@
 /**
- * Copyright (C) 2025 Alibaba Group Holding Limited
+ * Copyright (C) 2025 Alibaba Group Holding Holding Limited
  * All rights reserved.
  */
 import { PageController } from '../page-controller/PageController'
 import { Panel, SimulatorMask } from '../ui/index'
-// chalk 在浏览器中不可用，使用简单的 console 替代
+// chalk is unavailable in browser, use simple console instead
 interface ChalkFn {
 	(s: string): string
 	bold: (s: string) => string
@@ -32,7 +32,6 @@ export type { PageAgentConfig }
 export { tool, type PageAgentTool } from './tools'
 
 export interface AgentBrain {
-	// thinking?: string
 	evaluation_previous_goal: string
 	memory: string
 	next_goal: string
@@ -120,6 +119,11 @@ export class PageAgent extends EventTarget {
 		})
 		this.tools = new Map(tools)
 
+		// Initialize history if provided
+		if (this.config.initialHistory) {
+			this.history = [...this.config.initialHistory]
+		}
+
 		// Initialize PageController with config
 		this.pageController = new PageController(this.config)
 
@@ -153,6 +157,20 @@ export class PageAgent extends EventTarget {
 			if (!this.disposed) this.dispose('PAGE_UNLOADING')
 		}
 		window.addEventListener('beforeunload', this.#beforeUnloadListener)
+
+		this.#log('Agent initialized', 'info', { interactionMode: config.interactionMode })
+	}
+
+	#log(message: string, level: 'info' | 'warn' | 'error' | 'debug' = 'info', details?: any) {
+		chrome.runtime.sendMessage({
+			type: 'LOG_EVENT',
+			payload: {
+				level,
+				source: 'Agent',
+				message,
+				details
+			}
+		}).catch(() => { }) // Ignore if channel closed
 	}
 
 	/**
@@ -170,23 +188,30 @@ export class PageAgent extends EventTarget {
 
 		await onBeforeTask.call(this)
 
+		this.#log(`Task started: ${task}`, 'info')
+
 		// Show mask and panel
 		this.mask.show()
-
 		this.panel.show()
-		this.panel.reset()
 
-		this.panel.update({ type: 'input', task: this.task })
+		if (this.history.length > 0) {
+			this.panel.restore(this.history, this.task)
+		} else {
+			this.panel.reset()
+			this.panel.update({ type: 'input', task: this.task })
+		}
 
 		if (this.#abortController) {
 			this.#abortController.abort()
 			this.#abortController = new AbortController()
 		}
 
-		this.history = []
+		if (this.history.length === 0) {
+			this.history = []
+		}
 
 		try {
-			let step = 0
+			let step = this.history.length
 
 			while (true) {
 				await onBeforeStep.call(this, step)
@@ -199,13 +224,17 @@ export class PageAgent extends EventTarget {
 				await waitUntil(() => !this.paused)
 
 				// Update status to thinking
+				this.#reportStatus('思考中：分析页面状态...')
 				console.log(chalk.blue('Thinking...'))
 				this.panel.update({ type: 'thinking' })
 
 				const systemPrompt = this.#getSystemPrompt()
+
+				this.#reportStatus('思考中：提取页面元素...')
 				const userPrompt = await this.#assembleUserPrompt()
 
 				console.log('[PageAgent] Invoking LLM at step', step)
+				this.#reportStatus('思考中：等待 AI 决策...')
 
 				const result = await this.#llm.invoke(
 					[
@@ -244,6 +273,8 @@ export class PageAgent extends EventTarget {
 					usage: result.usage,
 				})
 
+				this.#log(`Step ${step} Decision: ${actionName}`, 'info', { brain, action })
+
 				console.log(chalk.green('Step finished:'), actionName)
 				console.groupEnd()
 
@@ -274,7 +305,15 @@ export class PageAgent extends EventTarget {
 					return result
 				}
 			}
-		} catch (error: unknown) {
+		} catch (error: any) {
+			if (error?.message === 'AbortError') {
+				console.log('Task aborted:', this.#abortController.signal.reason)
+				return {
+					success: false,
+					data: `Aborted: ${this.#abortController.signal.reason}`,
+					history: this.history,
+				}
+			}
 			console.error('Task failed', error)
 			this.#onDone(String(error), false)
 			const result: ExecutionResult = {
@@ -331,9 +370,9 @@ export class PageAgent extends EventTarget {
 				const toolName = Object.keys(action)[0]
 				const toolInput = action[toolName]
 				const brain = trimLines(`✅: ${input.evaluation_previous_goal}
-						💾: ${input.memory}
-						🎯: ${input.next_goal}
-`)
+							💾: ${input.memory}
+							🎯: ${input.next_goal}
+	`)
 
 				console.log(brain)
 				this.panel.update({ type: 'thinking', text: brain })
@@ -343,6 +382,7 @@ export class PageAgent extends EventTarget {
 				assert(tool, `Tool ${toolName} not found. (@note should have been caught before this!!!)`)
 
 				console.log(chalk.blue.bold(`Executing tool: ${toolName} `), toolInput)
+				this.#reportStatus(`正在执行：${toolName}...`)
 				this.panel.update({ type: 'toolExecuting', toolName, args: toolInput })
 
 				const startTime = Date.now()
@@ -351,6 +391,7 @@ export class PageAgent extends EventTarget {
 				let result = await tool.execute.bind(this)(toolInput)
 
 				const duration = Date.now() - startTime
+				this.#reportStatus(`执行完毕：${toolName}`)
 				console.log(chalk.green.bold(`Tool(${toolName}) executed for ${duration}ms`), result)
 
 				if (toolName === 'wait') {
@@ -409,13 +450,13 @@ export class PageAgent extends EventTarget {
 		prompt += '<agent_history>\n'
 
 		this.history.forEach((history, index) => {
-			prompt += `< step_${index + 1}>
-	Evaluation of Previous Step: ${history.brain.evaluation_previous_goal}
+			prompt += `<step_${index + 1}>
+Evaluation of Previous Step: ${history.brain.evaluation_previous_goal}
 Memory: ${history.brain.memory}
-				Next Goal: ${history.brain.next_goal}
-				Action Results: ${history.action.output}
+Next Goal: ${history.brain.next_goal}
+Action Results: ${history.action.output}
 </step_${index + 1}>
-	`
+`
 		})
 
 		prompt += '</agent_history>\n\n'
@@ -425,16 +466,16 @@ Memory: ${history.brain.memory}
 		//  - <step_info>
 		// <agent_state>
 
-		prompt += `< agent_state >
-	<user_request>
-	${this.task}
+		prompt += `<agent_state>
+<user_request>
+${this.task}
 </user_request>
-	<step_info>
-			Step ${this.history.length + 1} of ${MAX_STEPS} max possible steps
-			Current date and time: ${new Date().toISOString()}
+<step_info>
+Step ${this.history.length + 1} of ${MAX_STEPS} max possible steps
+Current date and time: ${new Date().toISOString()}
 </step_info>
-	</agent_state>
-		`
+</agent_state>
+`
 
 		// <browser_state>
 
@@ -474,18 +515,18 @@ Memory: ${history.brain.memory}
 		const simplifiedHTML = await this.pageController.getSimplifiedHTML()
 
 		let prompt = trimLines(`<browser_state>
-			Current Page: [${pageTitle}](${pageUrl})
+Current Page: [${pageTitle}](${pageUrl})
 
-			Page info: ${pi.viewport_width}x${pi.viewport_height}px viewport, ${pi.page_width}x${pi.page_height}px total page size, ${pi.pages_above.toFixed(1)} pages above, ${pi.pages_below.toFixed(1)} pages below, ${pi.total_pages.toFixed(1)} total pages, at ${(pi.current_page_position * 100).toFixed(0)}% of page
+Page info: ${pi.viewport_width}x${pi.viewport_height}px viewport, ${pi.page_width}x${pi.page_height}px total page size, ${pi.pages_above.toFixed(1)} pages above, ${pi.pages_below.toFixed(1)} pages below, ${pi.total_pages.toFixed(1)} total pages, at ${(pi.current_page_position * 100).toFixed(0)}% of page
 
-			${viewportExpansion === -1 ? 'Interactive elements from top layer of the current page (full page):' : 'Interactive elements from top layer of the current page inside the viewport:'}
+${viewportExpansion === -1 ? 'Interactive elements from top layer of the current page (full page):' : 'Interactive elements from top layer of the current page inside the viewport:'}
 
 `)
 
 		// Page header info
 		const has_content_above = pi.pixels_above > 4
 		if (has_content_above && viewportExpansion !== -1) {
-			prompt += `... ${pi.pixels_above} pixels above(${pi.pages_above.toFixed(1)} pages) - scroll to see more ...\n`
+			prompt += `... ${pi.pixels_above} pixels above (${pi.pages_above.toFixed(1)} pages) - scroll to see more ...\n`
 		} else {
 			prompt += `[Start of page]\n`
 		}
@@ -497,7 +538,7 @@ Memory: ${history.brain.memory}
 		// Page footer info
 		const has_content_below = pi.pixels_below > 4
 		if (has_content_below && viewportExpansion !== -1) {
-			prompt += `... ${pi.pixels_below} pixels below(${pi.pages_below.toFixed(1)} pages) - scroll to see more ...\n`
+			prompt += `... ${pi.pixels_below} pixels below (${pi.pages_below.toFixed(1)} pages) - scroll to see more ...\n`
 		} else {
 			prompt += `[End of page]\n`
 		}
@@ -508,13 +549,20 @@ Memory: ${history.brain.memory}
 	}
 
 	dispose(reason?: string) {
-		console.log('Disposing PageAgent...')
+		if (this.disposed && reason !== 'PAGE_UNLOADING') return
+		console.log('Disposing PageAgent, reason:', reason)
+
 		this.disposed = true
+		this.#abortController.abort(reason ?? 'PageAgent disposed')
+
 		this.pageController.dispose()
 		this.panel.dispose()
 		this.mask.dispose()
-		this.history = []
-		this.#abortController.abort(reason ?? 'PageAgent disposed')
+
+		// Only clear history if it's a final stop, not a navigation
+		if (reason !== 'PAGE_UNLOADING' && reason !== 'USER_STOPPED') {
+			this.history = []
+		}
 
 		// Clean up LLM event listeners
 		if (this.#llmRetryListener) {
@@ -533,5 +581,10 @@ Memory: ${history.brain.memory}
 		}
 
 		this.config.onDispose?.call(this, reason)
+	}
+
+	#reportStatus(status: string) {
+		if (this.disposed) return
+		this.config.onStatusChange?.call(this, status)
 	}
 }

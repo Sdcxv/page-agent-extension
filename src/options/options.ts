@@ -21,6 +21,7 @@ const elements = {
 
     // UI Config
     language: document.getElementById('language') as HTMLSelectElement,
+    interactionMode: document.getElementById('interactionMode') as HTMLSelectElement,
 
     // Footer
     statusIndicator: document.getElementById('statusIndicator') as HTMLSpanElement,
@@ -30,6 +31,12 @@ const elements = {
     testBtn: document.getElementById('testBtn') as HTMLButtonElement,
     testToolBtn: document.getElementById('testToolBtn') as HTMLButtonElement,
     testResult: document.getElementById('testResult') as HTMLDivElement,
+
+    // Logs
+    refreshLogsBtn: document.getElementById('refreshLogsBtn') as HTMLButtonElement,
+    exportLogsBtn: document.getElementById('exportLogsBtn') as HTMLButtonElement,
+    clearLogsBtn: document.getElementById('clearLogsBtn') as HTMLButtonElement,
+    logContainer: document.getElementById('logContainer') as HTMLDivElement,
 }
 
 let currentConfig: ExtensionConfig
@@ -56,6 +63,7 @@ function populateForm(config: ExtensionConfig) {
 
     // UI Config
     elements.language.value = config.ui.language
+    elements.interactionMode.value = config.ui.interactionMode || 'debugger'
 }
 
 // Render tools grid
@@ -126,6 +134,11 @@ function setupEventListeners() {
     // Test buttons
     elements.testBtn.addEventListener('click', testConnection)
     elements.testToolBtn.addEventListener('click', testToolUse)
+
+    // Log buttons
+    elements.refreshLogsBtn.addEventListener('click', refreshLogs)
+    elements.exportLogsBtn.addEventListener('click', exportLogs)
+    elements.clearLogsBtn.addEventListener('click', clearLogs)
 }
 
 // Get form values
@@ -142,6 +155,7 @@ function getFormValues(): ExtensionConfig {
         tools: currentConfig.tools,
         ui: {
             language: elements.language.value as 'zh-CN' | 'en-US',
+            interactionMode: elements.interactionMode.value as 'simulated' | 'debugger',
         },
     }
 }
@@ -337,6 +351,87 @@ async function testToolUse() {
     } finally {
         elements.testToolBtn.disabled = false
         elements.testToolBtn.textContent = '🛠️ 测试 Tool Use (智能识别工具)'
+    }
+}
+
+// Refresh logs from background
+async function refreshLogs() {
+    try {
+        elements.refreshLogsBtn.disabled = true
+        elements.refreshLogsBtn.textContent = '正在获取...'
+
+        const response = await chrome.runtime.sendMessage({ type: 'GET_LOGS' })
+        const logs = response?.logs || []
+
+        if (logs.length === 0) {
+            elements.logContainer.innerHTML = '<div class="log-placeholder">目前没有日志。开始任务或进行跳转后将在此显示。</div>'
+            return
+        }
+
+        elements.logContainer.innerHTML = ''
+        // Show in reverse chronological order
+        logs.reverse().forEach((log: any) => {
+            const entry = document.createElement('div')
+            entry.className = `log-entry ${log.level || 'info'}`
+
+            const time = new Date(log.timestamp).toLocaleTimeString()
+            const detailsStr = log.details ? `\n<div class="log-details">${JSON.stringify(log.details, null, 2)}</div>` : ''
+
+            entry.innerHTML = `
+                <div class="log-header">
+                    <span class="log-source">${log.source}</span>
+                    <span class="log-time">${time}</span>
+                </div>
+                <div class="log-message">${log.message}</div>
+                ${detailsStr}
+            `
+            elements.logContainer.appendChild(entry)
+        })
+
+    } catch (err) {
+        console.error('Failed to refresh logs:', err)
+        updateStatus('加载日志失败', 'error')
+    } finally {
+        elements.refreshLogsBtn.disabled = false
+        elements.refreshLogsBtn.textContent = '🔄 刷新'
+    }
+}
+
+// Export logs to JSON file
+async function exportLogs() {
+    try {
+        const response = await chrome.runtime.sendMessage({ type: 'GET_LOGS' })
+        const logs = response?.logs || []
+
+        if (logs.length === 0) {
+            alert('没有可导出的日志')
+            return
+        }
+
+        const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `page-agent-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+    } catch (err) {
+        console.error('Failed to export logs:', err)
+        alert('导出失败')
+    }
+}
+
+// Clear logs
+async function clearLogs() {
+    if (!confirm('确定要清空所有运行日志吗？')) return
+
+    try {
+        await chrome.runtime.sendMessage({ type: 'CLEAR_LOGS' })
+        elements.logContainer.innerHTML = '<div class="log-placeholder">日志已清空。</div>'
+        updateStatus('日志已清空', 'success')
+    } catch (err) {
+        console.error('Failed to clear logs:', err)
+        updateStatus('清空失败', 'error')
     }
 }
 

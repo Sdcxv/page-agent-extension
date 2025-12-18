@@ -25,6 +25,7 @@ import { patchReact } from './patches/react'
  */
 export interface PageControllerConfig extends dom.DomConfig {
 	viewportExpansion?: number
+	interactionMode?: 'simulated' | 'debugger'
 }
 
 interface ActionResult {
@@ -183,7 +184,7 @@ export class PageController extends EventTarget {
 		try {
 			const element = getElementByIndex(this.selectorMap, index)
 			const elemText = this.elementTextMap.get(index)
-			await clickElement(element)
+			await clickElement(element, this.config.interactionMode)
 
 			// Handle links that open in new tabs
 			if (element instanceof HTMLAnchorElement && element.target === '_blank') {
@@ -212,7 +213,7 @@ export class PageController extends EventTarget {
 		try {
 			const element = getElementByIndex(this.selectorMap, index)
 			const elemText = this.elementTextMap.get(index)
-			await inputTextElement(element, text)
+			await inputTextElement(element, text, this.config.interactionMode)
 
 			return {
 				success: true,

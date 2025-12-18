@@ -61,30 +61,57 @@ function blurLastClickedElement() {
 /**
  * Simulate a click on the element
  */
-export async function clickElement(element: HTMLElement) {
+export async function clickElement(element: HTMLElement, mode: 'simulated' | 'debugger' = 'simulated') {
 	blurLastClickedElement()
 
 	lastClickedElement = element
 	await scrollIntoViewIfNeeded(element)
+
+	// Wait for scroll to settle
+	await waitFor(0.2)
+
 	await movePointerToElement(element)
 	window.dispatchEvent(new CustomEvent('PageAgent::ClickPointer'))
 	await waitFor(0.1)
 
-	// hover it
-	element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }))
-	element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }))
+	if (mode === 'debugger') {
+		const rect = element.getBoundingClientRect()
+		const x = rect.left + rect.width / 2
+		const y = rect.top + rect.height / 2
 
-	// dispatch a sequence of events to ensure all listeners are triggered
-	element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+		console.log(`[PageAgent Content] Debugger click at: (${x}, ${y})`);
 
-	// focus it to ensure it gets the click event
-	element.focus()
+		// Temporarily disable mask to let CDP click penetrate to the target element
+		const mask = document.getElementById('page-agent-runtime_simulator-mask')
+		if (mask) mask.style.setProperty('pointer-events', 'none', 'important')
 
-	element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }))
-	element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+		// Use chrome.runtime.sendMessage for debugger click via background worker
+		await new Promise((resolve) => {
+			chrome.runtime.sendMessage({
+				type: 'DEBUGGER_CLICK',
+				payload: { x, y },
+				timestamp: Date.now()
+			}, (response) => {
+				// Restore mask events
+				if (mask) mask.style.setProperty('pointer-events', 'auto', 'important')
+				console.log('[PageAgent Content] Debugger click finished', response);
+				resolve(response);
+			})
+		})
+	} else {
+		// hover it
+		element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }))
+		element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }))
 
-	// dispatch a click event
-	// element.click()
+		// dispatch a sequence of events to ensure all listeners are triggered
+		element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+
+		// focus it to ensure it gets the click event
+		element.focus()
+
+		element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }))
+		element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+	}
 
 	await waitFor(0.1) // Wait to ensure click event processing completes
 }
@@ -119,21 +146,32 @@ export async function createSyntheticInputEvent(elem: HTMLElement, key: string) 
 	elem.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key }))
 }
 
-export async function inputTextElement(element: HTMLElement, text: string) {
+export async function inputTextElement(element: HTMLElement, text: string, mode: 'simulated' | 'debugger' = 'simulated') {
 	if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) {
 		throw new Error('Element is not an input or textarea')
 	}
 
-	await clickElement(element)
+	await clickElement(element, mode)
 
-	if (element instanceof HTMLTextAreaElement) {
-		nativeTextAreaValueSetter.call(element, text)
+	if (mode === 'debugger') {
+		// Use chrome.runtime.sendMessage for debugger typing via background worker
+		await new Promise((resolve) => {
+			chrome.runtime.sendMessage({
+				type: 'DEBUGGER_TYPE',
+				payload: { text },
+				timestamp: Date.now()
+			}, (response) => resolve(response))
+		})
 	} else {
-		nativeInputValueSetter.call(element, text)
-	}
+		if (element instanceof HTMLTextAreaElement) {
+			nativeTextAreaValueSetter.call(element, text)
+		} else {
+			nativeInputValueSetter.call(element, text)
+		}
 
-	const inputEvent = new Event('input', { bubbles: true })
-	element.dispatchEvent(inputEvent)
+		const inputEvent = new Event('input', { bubbles: true })
+		element.dispatchEvent(inputEvent)
+	}
 
 	await waitFor(0.1) // Wait to ensure input event processing completes
 
@@ -283,8 +321,8 @@ export async function scrollVertically(
 	el = canScroll(el)
 		? el
 		: Array.from(document.querySelectorAll<HTMLElement>('*')).find(canScroll) ||
-			(document.scrollingElement as HTMLElement) ||
-			(document.documentElement as HTMLElement)
+		(document.scrollingElement as HTMLElement) ||
+		(document.documentElement as HTMLElement)
 
 	if (el === document.scrollingElement || el === document.documentElement || el === document.body) {
 		window.scrollBy(0, dy)
@@ -406,8 +444,8 @@ export async function scrollHorizontally(
 	el = canScroll(el)
 		? el
 		: Array.from(document.querySelectorAll<HTMLElement>('*')).find(canScroll) ||
-			(document.scrollingElement as HTMLElement) ||
-			(document.documentElement as HTMLElement)
+		(document.scrollingElement as HTMLElement) ||
+		(document.documentElement as HTMLElement)
 
 	if (el === document.scrollingElement || el === document.documentElement || el === document.body) {
 		window.scrollBy(dx, 0)

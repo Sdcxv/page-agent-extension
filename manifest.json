@@ -29,13 +29,14 @@
       "js": [
         "src/content/content-script.ts"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"

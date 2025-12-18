@@ -53,6 +53,7 @@ export class Panel {
 	#headerUpdateTimer: ReturnType<typeof setInterval> | null = null
 	#pendingHeaderText: string | null = null
 	#isAnimating = false
+	#disposed = false
 
 	get wrapper(): HTMLElement {
 		return this.#wrapper
@@ -75,6 +76,27 @@ export class Panel {
 		this.#startHeaderUpdateLoop()
 
 		this.#showInputArea()
+
+		// Append to body if available, otherwise documentElement
+		this.#safeAppend(this.#wrapper)
+	}
+
+	#safeAppend(element: HTMLElement) {
+		const tryAppend = () => {
+			const target = document.body || document.documentElement
+			if (target) {
+				target.appendChild(element)
+				return true
+			}
+			return false
+		}
+
+		if (!tryAppend()) {
+			const observer = new MutationObserver(() => {
+				if (tryAppend()) observer.disconnect()
+			})
+			observer.observe(document, { childList: true, subtree: true })
+		}
 	}
 
 	/**
@@ -102,6 +124,7 @@ export class Panel {
 	// ========== Public control methods ==========
 
 	show(): void {
+		if (this.#disposed) return
 		this.wrapper.style.display = 'block'
 		void this.wrapper.offsetHeight
 		this.wrapper.style.opacity = '1'
@@ -109,12 +132,14 @@ export class Panel {
 	}
 
 	hide(): void {
+		if (this.#disposed) return
 		this.wrapper.style.opacity = '0'
 		this.wrapper.style.transform = 'translateX(-50%) translateY(20px)'
 		this.wrapper.style.display = 'none'
 	}
 
 	reset(): void {
+		if (this.#disposed) return
 		this.#state.reset()
 		this.#statusText.textContent = this.#i18n.t('ui.panel.ready')
 		this.#updateStatusIndicator('thinking')
@@ -141,6 +166,35 @@ export class Panel {
 	}
 
 	/**
+	 * Restore panel state from history (used for navigation resumption)
+	 */
+	restore(history: any[], task: string): void {
+		if (this.#disposed) return
+		// Reset first
+		this.reset()
+
+		// Set initial task
+		this.update({ type: 'input', task })
+
+		// Replay history items into the UI state
+		for (const record of history) {
+			if (record.action) {
+				this.update({
+					type: 'toolCompleted',
+					toolName: record.action.name,
+					args: record.action.input,
+					result: record.action.output
+				})
+			}
+		}
+
+		// Ensure it stays expanded to show history if there is any
+		if (history.length > 0) {
+			this.#expand()
+		}
+	}
+
+	/**
 	 * Update panel with semantic data - i18n handled internally
 	 */
 	update(data: PanelUpdate): void {
@@ -152,6 +206,7 @@ export class Panel {
 	 * Dispose panel
 	 */
 	dispose(): void {
+		this.#disposed = true
 		this.#isWaitingForUserAnswer = false
 		this.#stopHeaderUpdateLoop()
 		this.wrapper.remove()
@@ -250,6 +305,7 @@ export class Panel {
 	 * Update status (internal)
 	 */
 	#updateInternal(stepData: Omit<Step, 'id' | 'stepNumber' | 'timestamp'>): void {
+		if (this.#disposed) return
 		// Skip empty displayText (filtered toolCompleted for 'done')
 		if (!stepData.displayText) return
 
@@ -409,12 +465,12 @@ export class Panel {
 			<div class="${styles.historySectionWrapper}">
 				<div class="${styles.historySection}">
 					${this.#createHistoryItem({
-						id: 'placeholder',
-						stepNumber: 0,
-						timestamp: new Date(),
-						type: 'thinking',
-						displayText: this.#i18n.t('ui.panel.waitingPlaceholder'),
-					})}
+			id: 'placeholder',
+			stepNumber: 0,
+			timestamp: new Date(),
+			type: 'thinking',
+			displayText: this.#i18n.t('ui.panel.waitingPlaceholder'),
+		})}
 				</div>
 			</div>
 			<div class="${styles.header}">
@@ -566,6 +622,7 @@ export class Panel {
 		this.#statusText.classList.add(styles.fadeOut)
 
 		setTimeout(() => {
+			if (this.#disposed) return
 			// Update text content
 			this.#statusText.textContent = newText
 
@@ -574,6 +631,7 @@ export class Panel {
 			this.#statusText.classList.add(styles.fadeIn)
 
 			setTimeout(() => {
+				if (this.#disposed) return
 				this.#statusText.classList.remove(styles.fadeIn)
 				this.#isAnimating = false
 			}, 300)
@@ -600,6 +658,7 @@ export class Panel {
 	#scrollToBottom(): void {
 		// Execute in next event loop to ensure DOM update completion
 		setTimeout(() => {
+			if (this.#disposed) return
 			this.#historySection.scrollTop = this.#historySection.scrollHeight
 		}, 0)
 	}

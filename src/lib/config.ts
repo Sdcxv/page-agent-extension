@@ -16,6 +16,7 @@ export interface ToolConfig {
 
 export interface UIConfig {
     language: 'zh-CN' | 'en-US'
+    interactionMode: 'simulated' | 'debugger'
 }
 
 export interface ExtensionConfig {
@@ -49,6 +50,7 @@ export const DEFAULT_CONFIG: ExtensionConfig = {
     },
     ui: {
         language: 'zh-CN',
+        interactionMode: 'debugger', // Default to enhanced debugger clicks
     },
 }
 

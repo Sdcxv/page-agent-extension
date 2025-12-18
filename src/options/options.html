@@ -107,6 +107,32 @@
               <option value="en-US">English</option>
             </select>
           </div>
+          <div class="form-group">
+            <label for="interactionMode">交互模式</label>
+            <select id="interactionMode">
+              <option value="debugger">增强模式 (使用 Debugger - 更稳健但有提示条)</option>
+              <option value="simulated">兼容模式 (旧版 - 模拟点击，低干扰)</option>
+            </select>
+            <p class="hint">增强模式支持物理点击和绕过某些框架保护，但会在页面上方显示调试提示条。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 运行日志 -->
+      <section class="section">
+        <h2 class="section-title">
+          <span class="section-icon">📜</span>
+          运行日志
+        </h2>
+        <div class="section-content">
+          <div class="log-controls">
+            <button type="button" class="btn btn-sm btn-secondary" id="refreshLogsBtn">🔄 刷新</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="exportLogsBtn">💾 导出 (JSON)</button>
+            <button type="button" class="btn btn-sm btn-danger" id="clearLogsBtn">🗑️ 清空</button>
+          </div>
+          <div class="log-container" id="logContainer">
+            <div class="log-placeholder">点击刷新以查看由于跳转或调试产生的日志...</div>
+          </div>
         </div>
       </section>
     </main>
