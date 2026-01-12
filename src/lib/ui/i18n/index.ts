@@ -12,7 +12,7 @@ export class I18n {
 
 	constructor(language: SupportedLanguage = 'en-US') {
 		this.language = language in locales ? language : 'en-US'
-		this.translations = locales[language]
+		this.translations = locales[this.language]
 	}
 
 	// 类型安全的翻译方法

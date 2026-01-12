@@ -65,7 +65,7 @@ export class SimulatorMask {
 		this.#createCursor()
 		// this.show()
 
-		this.#safeAppend(this.wrapper)
+		document.body.appendChild(this.wrapper)
 
 		this.#moveCursorToTarget()
 
@@ -100,10 +100,7 @@ export class SimulatorMask {
 		this.wrapper.appendChild(this.#cursor)
 	}
 
-	#disposed = false
-
 	#moveCursorToTarget() {
-		if (this.#disposed) return
 		const newX = this.#currentCursorX + (this.#targetCursorX - this.#currentCursorX) * 0.2
 		const newY = this.#currentCursorY + (this.#targetCursorY - this.#currentCursorY) * 0.2
 
@@ -131,13 +128,11 @@ export class SimulatorMask {
 	}
 
 	setCursorPosition(x: number, y: number) {
-		if (this.#disposed) return
 		this.#targetCursorX = x
 		this.#targetCursorY = y
 	}
 
 	triggerClickAnimation() {
-		if (this.#disposed) return
 		this.#cursor.classList.remove(cursorStyles.clicking)
 		// Force reflow to restart animation
 		void this.#cursor.offsetHeight
@@ -145,7 +140,6 @@ export class SimulatorMask {
 	}
 
 	show() {
-		if (this.#disposed) return
 		this.motion.start()
 		this.motion.fadeIn()
 
@@ -161,38 +155,17 @@ export class SimulatorMask {
 	}
 
 	hide() {
-		if (this.#disposed) return
 		this.motion.fadeOut()
 		this.motion.pause()
 
 		this.#cursor.classList.remove(cursorStyles.clicking)
 
 		setTimeout(() => {
-			if (this.#disposed) return
 			this.wrapper.style.display = 'none'
 		}, 800) // Match the animation duration
 	}
 
-	#safeAppend(element: HTMLElement) {
-		const tryAppend = () => {
-			const target = document.body || document.documentElement
-			if (target) {
-				target.appendChild(element)
-				return true
-			}
-			return false
-		}
-
-		if (!tryAppend()) {
-			const observer = new MutationObserver(() => {
-				if (tryAppend()) observer.disconnect()
-			})
-			observer.observe(document, { childList: true, subtree: true })
-		}
-	}
-
 	dispose() {
-		this.#disposed = true
 		this.motion.dispose()
 		this.wrapper.remove()
 	}

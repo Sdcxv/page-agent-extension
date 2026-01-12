@@ -1,14 +1,19 @@
 /**
  * OpenAI Client implementation
+ * @note This client is only for demonstrating how to implement a LLM client.
+ * @note Use OpenAILenientClient instead.
  */
 import { InvokeError, InvokeErrorType } from './errors'
-import type { InvokeResult, LLMClient, Message, OpenAIClientConfig, Tool } from './types'
+import type { InvokeResult, LLMClient, LLMConfig, Message, Tool } from './types'
 import { modelPatch, zodToOpenAITool } from './utils'
 
+/**
+ * @deprecated Use OpenAILenientClient instead.
+ */
 export class OpenAIClient implements LLMClient {
-	config: OpenAIClientConfig
+	config: LLMConfig
 
-	constructor(config: OpenAIClientConfig) {
+	constructor(config: LLMConfig) {
 		this.config = config
 	}
 
@@ -22,23 +27,6 @@ export class OpenAIClient implements LLMClient {
 
 		// 2. Call API
 		let response: Response
-		const requestBody = modelPatch({
-			model: this.config.model,
-			temperature: this.config.temperature,
-			max_tokens: this.config.maxTokens,
-			messages,
-			tools: openaiTools,
-			tool_choice: 'required',
-			parallel_tool_calls: false,
-		})
-
-		console.log('[OpenAIClient] Calling LLM:', {
-			url: `${this.config.baseURL}/chat/completions`,
-			model: this.config.model,
-			toolsCount: openaiTools.length,
-			body: requestBody
-		})
-
 		try {
 			response = await fetch(`${this.config.baseURL}/chat/completions`, {
 				method: 'POST',
@@ -46,7 +34,23 @@ export class OpenAIClient implements LLMClient {
 					'Content-Type': 'application/json',
 					Authorization: `Bearer ${this.config.apiKey}`,
 				},
-				body: JSON.stringify(requestBody),
+				body: JSON.stringify(
+					modelPatch({
+						model: this.config.model,
+						temperature: this.config.temperature,
+						messages,
+
+						tools: openaiTools,
+						// tool_choice: 'required',
+						tool_choice: { type: 'function', function: { name: 'AgentOutput' } },
+
+						// model specific params
+
+						// reasoning_effort: 'minimal',
+						// verbosity: 'low',
+						parallel_tool_calls: false,
+					})
+				),
 				signal: abortSignal,
 			})
 		} catch (error: unknown) {
@@ -57,11 +61,6 @@ export class OpenAIClient implements LLMClient {
 		// 3. Handle HTTP errors
 		if (!response.ok) {
 			const errorData = await response.json().catch()
-			console.error('[OpenAIClient] API Error:', {
-				status: response.status,
-				statusText: response.statusText,
-				errorData
-			})
 			const errorMessage =
 				(errorData as { error?: { message?: string } }).error?.message || response.statusText
 

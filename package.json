@@ -1,6 +1,6 @@
 {
     "name": "page-agent-extension",
-    "version": "1.0.0",
+    "version": "0.0.20",
     "description": "Page Agent Chrome Extension - AI-powered GUI agent for web applications",
     "type": "module",
     "scripts": {

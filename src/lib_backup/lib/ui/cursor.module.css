@@ -1,0 +1,91 @@
+/* AI 光标样式 */
+.cursor {
+	position: absolute;
+	width: var(--cursor-size, 75px);
+	height: var(--cursor-size, 75px);
+	pointer-events: none;
+	z-index: 10000;
+	transform: translate(-30%, -30%);
+
+	animation: cursor-enter 300ms ease-out forwards;
+}
+
+.cursorBorder {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(45deg, rgb(57, 182, 255), rgb(189, 69, 251));
+	mask-image: url(https://img.alicdn.com/imgextra/i1/O1CN01YHLVYR1LvqWIyo5kH_!!6000000001362-2-tps-202-202.png);
+	mask-size: 100% 100%;
+	mask-repeat: no-repeat;
+	animation: cursor-breathe 2s ease-in-out infinite;
+}
+
+.cursorFilling {
+	position: absolute;
+	inset: 0;
+	background: url(https://img.alicdn.com/imgextra/i3/O1CN01JZOqOS1Tu1sIKbPLW_!!6000000002441-2-tps-202-202.png);
+	background-size: 100% 100%;
+	background-repeat: no-repeat;
+}
+
+.cursorRipple {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.cursor.clicking .cursorRipple::after {
+	content: '';
+	position: absolute;
+	width: 100%;
+	height: 100%;
+	left: -30%;
+	top: -30%;
+	border: 4px solid rgba(57, 182, 255, 1);
+	border-radius: 50%;
+	animation: cursor-ripple 300ms ease-out forwards;
+}
+
+/* 光标动画关键帧 */
+@keyframes cursor-breathe {
+	0%,
+	100% {
+		transform: scale(1);
+		opacity: 0.9;
+	}
+	50% {
+		transform: scale(1.05);
+		opacity: 1;
+	}
+}
+
+@keyframes cursor-rotate {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes cursor-enter {
+	0% {
+		transform: translate(-30%, -30%) scale(0.5);
+		opacity: 0;
+	}
+	100% {
+		transform: translate(-30%, -30%) scale(1);
+		opacity: 1;
+	}
+}
+
+@keyframes cursor-ripple {
+	0% {
+		transform: scale(0);
+		opacity: 1;
+	}
+	100% {
+		transform: scale(2);
+		opacity: 0;
+	}
+}

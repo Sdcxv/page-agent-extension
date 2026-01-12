@@ -1,0 +1,10 @@
+.wrapper {
+	position: fixed;
+	inset: 0;
+	z-index: 2147483641; /* 确保在所有元素之上，除了 panel */
+	/* pointer-events: none; */
+	cursor: not-allowed;
+	overflow: hidden;
+
+	display: none;
+}

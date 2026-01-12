@@ -1,25 +1,11 @@
-import type { PageControllerConfig } from '@page-agent/page-controller'
-import type { SupportedLanguage } from '@page-agent/ui'
+import type { LLMConfig } from '../llms'
+import type { PageControllerConfig } from '../../page-controller/PageController'
+import type { SupportedLanguage } from '../../ui'
 
 import type { AgentHistory, ExecutionResult, PageAgent } from '../PageAgent'
 import type { PageAgentTool } from '../tools'
-import {
-	DEFAULT_API_KEY,
-	DEFAULT_BASE_URL,
-	DEFAULT_MAX_TOKENS,
-	DEFAULT_MODEL_NAME,
-	DEFAULT_TEMPERATURE,
-	LLM_MAX_RETRIES,
-} from './constants'
 
-export interface LLMConfig {
-	baseURL?: string
-	apiKey?: string
-	model?: string
-	temperature?: number
-	maxTokens?: number
-	maxRetries?: number
-}
+export type { LLMConfig }
 
 export interface AgentConfig {
 	// theme?: 'light' | 'dark'
@@ -56,23 +42,37 @@ export interface AgentConfig {
 	 */
 	customTools?: Record<string, PageAgentTool | null>
 
+	/**
+	 * Instructions to guide the agent's behavior
+	 */
+	instructions?: {
+		/**
+		 * Global system-level instructions, applied to all tasks
+		 */
+		system?: string
+
+		/**
+		 * Dynamic page-level instructions callback
+		 * Called before each step to get instructions for the current page
+		 * @param url - Current page URL (window.location.href)
+		 * @returns Instructions string, or undefined/null to skip
+		 */
+		getPageInstructions?: (url: string) => string | undefined | null
+	}
+
 	// lifecycle hooks
 	// @todo: use event instead of hooks
+	// @todo: remove `this` binding, pass agent as explicit parameter instead
 
 	onBeforeStep?: (this: PageAgent, stepCnt: number) => Promise<void> | void
 	onAfterStep?: (this: PageAgent, stepCnt: number, history: AgentHistory[]) => Promise<void> | void
 	onBeforeTask?: (this: PageAgent) => Promise<void> | void
 	onAfterTask?: (this: PageAgent, result: ExecutionResult) => Promise<void> | void
-	onStatusChange?: (this: PageAgent, status: string) => void
-
-	/**
-	 * History to resume from after navigation
-	 */
-	initialHistory?: AgentHistory[]
 
 	/**
 	 * @note this hook can block the disposal process
 	 * @note when dispose caused by page unload, reason will be 'PAGE_UNLOADING'. this method CANNOT block unloading. async operations may be cut.
+	 * @todo remove `this` binding, pass agent as explicit parameter instead
 	 */
 	onDispose?: (this: PageAgent, reason?: string) => void
 
@@ -87,9 +87,26 @@ export interface AgentConfig {
 	experimentalScriptExecutionTool?: boolean
 
 	/**
+	 * Transform page content before sending to LLM.
+	 * Called after DOM extraction and simplification, before LLM invocation.
+	 * Use cases: inspect extraction results, modify page info, mask sensitive data.
+	 *
+	 * @param content - Simplified page content that will be sent to LLM
+	 * @returns Transformed content
+	 *
+	 * @example
+	 * // Mask phone numbers
+	 * transformPageContent: async (content) => {
+	 *   return content.replace(/1[3-9]\d{9}/g, '***********')
+	 * }
+	 */
+	transformPageContent?: (content: string) => Promise<string> | string
+
+	/**
 	 * TODO: @unimplemented
 	 * hook when action causes a new page to be opened
 	 * @note PageAgent will try to detect new pages and decide if it's caused by an action. But not very reliable.
+	 * @todo remove `this` binding, pass agent as explicit parameter instead
 	 */
 	onNewPageOpen?: (this: PageAgent, url: string) => Promise<void> | void
 
@@ -99,17 +116,20 @@ export interface AgentConfig {
 	 * @note will unload the current page when a action tries to open a new page. so that things keep in the same tab/window.
 	 */
 	experimentalPreventNewPage?: boolean
+
+	// ======= Extension-specific configs =======
+
+	/**
+	 * Initial history to resume a task from a previous state.
+	 * @extension-only
+	 */
+	initialHistory?: AgentHistory[]
+
+	/**
+	 * Callback to report status updates to the extension UI.
+	 * @extension-only
+	 */
+	onStatusChange?: (this: PageAgent, status: string) => void
 }
 
 export type PageAgentConfig = LLMConfig & AgentConfig & PageControllerConfig
-
-export function parseLLMConfig(config: LLMConfig): Required<LLMConfig> {
-	return {
-		baseURL: config.baseURL ?? DEFAULT_BASE_URL,
-		apiKey: config.apiKey ?? DEFAULT_API_KEY,
-		model: config.model ?? DEFAULT_MODEL_NAME,
-		temperature: config.temperature ?? DEFAULT_TEMPERATURE,
-		maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
-		maxRetries: config.maxRetries ?? LLM_MAX_RETRIES,
-	}
-}

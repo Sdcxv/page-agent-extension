@@ -31,13 +31,48 @@
  * - 永远使用 tool call 来返回结构化数据，禁止模型直接返回（视为出错）
  * - 不能假设 tool 参数合法，必须有修复机制，而且修复也应该使用 tool call 返回
  */
-import type { LLMConfig } from '../config'
-import { parseLLMConfig } from '../config'
 import { OpenAIClient } from './OpenAILenientClient'
+import {
+	DEFAULT_API_KEY,
+	DEFAULT_BASE_URL,
+	DEFAULT_MODEL_NAME,
+	DEFAULT_TEMPERATURE,
+	LLM_MAX_RETRIES,
+} from './constants'
 import { InvokeError } from './errors'
-import type { InvokeResult, LLMClient, Message, Tool } from './types'
+import type {
+	AgentBrain,
+	InvokeResult,
+	LLMClient,
+	LLMConfig,
+	MacroToolInput,
+	MacroToolResult,
+	Message,
+	Tool,
+} from './types'
 
-export type { Message, Tool, InvokeResult, LLMClient }
+export type {
+	AgentBrain,
+	InvokeResult,
+	LLMClient,
+	LLMConfig,
+	MacroToolInput,
+	MacroToolResult,
+	Message,
+	Tool,
+}
+
+export function parseLLMConfig(config: LLMConfig): Required<LLMConfig> {
+	return {
+		baseURL: config.baseURL ?? DEFAULT_BASE_URL,
+		apiKey: config.apiKey ?? DEFAULT_API_KEY,
+		model: config.model ?? DEFAULT_MODEL_NAME,
+		temperature: config.temperature ?? DEFAULT_TEMPERATURE,
+		maxRetries: config.maxRetries ?? LLM_MAX_RETRIES,
+		maxTokens: config.maxTokens,
+		customFetch: (config.customFetch ?? fetch).bind(globalThis), // fetch will be illegal unless bound
+	}
+}
 
 export class LLM extends EventTarget {
 	config: Required<LLMConfig>
@@ -48,13 +83,7 @@ export class LLM extends EventTarget {
 		this.config = parseLLMConfig(config)
 
 		// Default to OpenAI client
-		this.client = new OpenAIClient({
-			model: this.config.model,
-			apiKey: this.config.apiKey,
-			baseURL: this.config.baseURL,
-			temperature: this.config.temperature,
-			maxTokens: this.config.maxTokens,
-		})
+		this.client = new OpenAIClient(this.config)
 	}
 
 	/**

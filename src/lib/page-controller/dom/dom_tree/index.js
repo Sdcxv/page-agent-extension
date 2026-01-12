@@ -403,7 +403,7 @@ export default (
 			// Store cleanup function for later use
 			if (cleanupFn) {
 				// Keep a reference to cleanup functions in a global array
-				; (window._highlightCleanupFunctions = window._highlightCleanupFunctions || []).push(
+				;(window._highlightCleanupFunctions = window._highlightCleanupFunctions || []).push(
 					cleanupFn
 				)
 			}
@@ -1359,17 +1359,17 @@ export default (
 	/**
    * Handles the logic for deciding whether to highlight an element and performing the highlight.
    * @param {
-	{
-		tagName: string;
-		attributes: Record<string, string>;
-		xpath: any;
-		children: never[];
-		isVisible?: boolean;
-		isTopElement?: boolean;
-		isInteractive?: boolean;
-		isInViewport?: boolean;
-		highlightIndex?: number;
-		shadowRoot?: boolean;
+    {
+        tagName: string;
+        attributes: Record<string, string>;
+        xpath: any;
+        children: never[];
+        isVisible?: boolean;
+        isTopElement?: boolean;
+        isInteractive?: boolean;
+        isInViewport?: boolean;
+        highlightIndex?: number;
+        shadowRoot?: boolean;
    }} nodeData - The node data object.
    * @param {HTMLElement} node - The node to highlight.
    * @param {HTMLElement | null} parentIframe - The parent iframe node.
@@ -1530,21 +1530,21 @@ export default (
 		}
 
 		/**
-	 * @type {
-	  {
-		  tagName: string;
-		  attributes: Record<string, string | null>;
-		  xpath: any;
-		  children: never[];
-		  isVisible?: boolean;
-		  isTopElement?: boolean;
-		  isInteractive?: boolean;
-		  isInViewport?: boolean;
-		  highlightIndex?: number;
-		  shadowRoot?: boolean;
-	  }
-	} nodeData - The node data object.
-	 */
+     * @type {
+      {
+          tagName: string;
+          attributes: Record<string, string | null>;
+          xpath: any;
+          children: never[];
+          isVisible?: boolean;
+          isTopElement?: boolean;
+          isInteractive?: boolean;
+          isInViewport?: boolean;
+          highlightIndex?: number;
+          shadowRoot?: boolean;
+      }
+    } nodeData - The node data object.
+     */
 		const nodeData = {
 			tagName: node.tagName.toLowerCase(),
 			attributes: {},
@@ -1619,9 +1619,7 @@ export default (
 						}
 					}
 				} catch (e) {
-					if (debugMode) {
-						console.warn('Unable to access iframe (likely cross-origin):', e.message)
-					}
+					console.warn('Unable to access iframe:', e)
 				}
 			}
 			// Handle rich text editors and contenteditable elements

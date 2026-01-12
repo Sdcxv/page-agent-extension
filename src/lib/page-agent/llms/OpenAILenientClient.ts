@@ -1,16 +1,17 @@
 /**
  * OpenAI Client implementation
  */
-import type { MacroToolInput } from '../PageAgent'
 import { InvokeError, InvokeErrorType } from './errors'
-import type { InvokeResult, LLMClient, Message, OpenAIClientConfig, Tool } from './types'
+import type { InvokeResult, LLMClient, LLMConfig, MacroToolInput, Message, Tool } from './types'
 import { lenientParseMacroToolCall, modelPatch, zodToOpenAITool } from './utils'
 
 export class OpenAIClient implements LLMClient {
-	config: OpenAIClientConfig
+	config: Required<LLMConfig>
+	private fetch: typeof globalThis.fetch
 
-	constructor(config: OpenAIClientConfig) {
+	constructor(config: Required<LLMConfig>) {
 		this.config = config
+		this.fetch = config.customFetch
 	}
 
 	async invoke(
@@ -22,119 +23,71 @@ export class OpenAIClient implements LLMClient {
 		const openaiTools = Object.entries(tools).map(([name, tool]) => zodToOpenAITool(name, tool))
 
 		// 2. Call API
-		const requestBody = modelPatch({
-			model: this.config.model,
-			temperature: this.config.temperature,
-			max_tokens: this.config.maxTokens,
-			messages,
+		let response: Response
+		try {
+			response = await this.fetch(`${this.config.baseURL}/chat/completions`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					Authorization: `Bearer ${this.config.apiKey}`,
+				},
+				body: JSON.stringify(
+					modelPatch({
+						model: this.config.model,
+						temperature: this.config.temperature,
+						messages,
 
-			tools: openaiTools,
-			tool_choice: 'required',
-
-			// model specific params
-
-			// reasoning_effort: 'minimal',
-			// verbosity: 'low',
-			parallel_tool_calls: false,
-		})
-
-		const url = `${this.config.baseURL}/chat/completions`
-		const options = {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${this.config.apiKey}`,
-			},
-			body: JSON.stringify(requestBody),
-		}
-
-		let responseData: any
-		let isOk: boolean
-		let status: number
-		let statusText: string
-
-		// Use background proxy if in extension to bypass CSP
-		const isExtension = typeof chrome !== 'undefined' && chrome.runtime?.sendMessage
-		if (isExtension) {
-			console.log('[OpenAILenientClient] Using background proxy for fetch')
-			try {
-				const proxyResult = await new Promise<any>((resolve, reject) => {
-					chrome.runtime.sendMessage({
-						type: 'PROXY_FETCH',
-						payload: { url, options }
-					}, (result) => {
-						if (chrome.runtime.lastError) {
-							reject(chrome.runtime.lastError)
-						} else {
-							resolve(result)
-						}
+						tools: openaiTools,
+						// tool_choice: 'required',
+						tool_choice: { type: 'function', function: { name: 'AgentOutput' } },
+						parallel_tool_calls: false,
 					})
-				})
-
-				if (!proxyResult.ok && proxyResult.error) {
-					throw new Error(proxyResult.error)
-				}
-
-				isOk = proxyResult.ok
-				status = proxyResult.status
-				statusText = proxyResult.statusText
-				responseData = proxyResult.data
-			} catch (error: any) {
-				throw new InvokeError(InvokeErrorType.NETWORK_ERROR, `Proxy fetch failed: ${error.message}`, error)
-			}
-		} else {
-			// Normal fetch
-			let response: Response
-			try {
-				response = await fetch(url, options)
-				isOk = response.ok
-				status = response.status
-				statusText = response.statusText
-				responseData = await response.json().catch(() => ({}))
-			} catch (error: unknown) {
-				throw new InvokeError(InvokeErrorType.NETWORK_ERROR, 'Network request failed', error)
-			}
+				),
+				signal: abortSignal,
+			})
+		} catch (error: unknown) {
+			// Network error
+			console.error(error)
+			throw new InvokeError(InvokeErrorType.NETWORK_ERROR, 'Network request failed', error)
 		}
 
 		// 3. Handle HTTP errors
-		if (!isOk) {
-			console.error('[OpenAILenientClient] API Error:', {
-				status,
-				statusText,
-				responseData
-			})
-			const errorMessage = responseData?.error?.message || statusText
+		if (!response.ok) {
+			const errorData = await response.json().catch()
+			const errorMessage =
+				(errorData as { error?: { message?: string } }).error?.message || response.statusText
 
-			if (status === 401 || status === 403) {
+			if (response.status === 401 || response.status === 403) {
 				throw new InvokeError(
 					InvokeErrorType.AUTH_ERROR,
 					`Authentication failed: ${errorMessage}`,
-					responseData
+					errorData
 				)
 			}
-			if (status === 429) {
+			if (response.status === 429) {
 				throw new InvokeError(
 					InvokeErrorType.RATE_LIMIT,
 					`Rate limit exceeded: ${errorMessage}`,
-					responseData
+					errorData
 				)
 			}
-			if (status >= 500) {
+			if (response.status >= 500) {
 				throw new InvokeError(
 					InvokeErrorType.SERVER_ERROR,
 					`Server error: ${errorMessage}`,
-					responseData
+					errorData
 				)
 			}
 			throw new InvokeError(
 				InvokeErrorType.UNKNOWN,
-				`HTTP ${status}: ${errorMessage}`,
-				responseData
+				`HTTP ${response.status}: ${errorMessage}`,
+				errorData
 			)
 		}
 
 		// parse response
-		const data = responseData
+
+		const data = await response.json()
 		const tool = tools.AgentOutput
 		const macroToolInput = lenientParseMacroToolCall(data, tool.inputSchema as any)
 

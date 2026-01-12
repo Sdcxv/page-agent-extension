@@ -84,7 +84,7 @@ tools.set(
 		inputSchema: zod.object({
 			index: zod.number().int().min(0),
 		}),
-		execute: async function (this: PageAgent, input: { index: number }) {
+		execute: async function (this: PageAgent, input) {
 			const result = await this.pageController.clickElement(input.index)
 			return result.message
 		},
@@ -99,7 +99,7 @@ tools.set(
 			index: zod.number().int().min(0),
 			text: zod.string(),
 		}),
-		execute: async function (this: PageAgent, input: { index: number, text: string }) {
+		execute: async function (this: PageAgent, input) {
 			const result = await this.pageController.inputText(input.index, input.text)
 			return result.message
 		},
@@ -115,7 +115,7 @@ tools.set(
 			index: zod.number().int().min(0),
 			text: zod.string(),
 		}),
-		execute: async function (this: PageAgent, input: { index: number, text: string }) {
+		execute: async function (this: PageAgent, input) {
 			const result = await this.pageController.selectOption(input.index, input.text)
 			return result.message
 		},
@@ -138,8 +138,8 @@ tools.set(
 		}),
 		execute: async function (this: PageAgent, input) {
 			const result = await this.pageController.scroll({
-				down: input.down,
-				numPages: input.num_pages,
+				down: input.down ?? true,
+				numPages: input.num_pages ?? 0.1,
 				pixels: input.pixels,
 				index: input.index,
 			})
@@ -160,7 +160,7 @@ tools.set(
 		}),
 		execute: async function (this: PageAgent, input) {
 			const result = await this.pageController.scrollHorizontally({
-				right: input.right,
+				right: input.right ?? true,
 				pixels: input.pixels,
 				index: input.index,
 			})
