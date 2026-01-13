@@ -35,6 +35,7 @@ const elements = {
     // Logs
     refreshLogsBtn: document.getElementById('refreshLogsBtn') as HTMLButtonElement,
     exportLogsBtn: document.getElementById('exportLogsBtn') as HTMLButtonElement,
+    copyForAIBtn: document.getElementById('copyForAIBtn') as HTMLButtonElement,
     clearLogsBtn: document.getElementById('clearLogsBtn') as HTMLButtonElement,
     logContainer: document.getElementById('logContainer') as HTMLDivElement,
 }
@@ -138,6 +139,7 @@ function setupEventListeners() {
     // Log buttons
     elements.refreshLogsBtn.addEventListener('click', refreshLogs)
     elements.exportLogsBtn.addEventListener('click', exportLogs)
+    elements.copyForAIBtn.addEventListener('click', copyLogsForAI)
     elements.clearLogsBtn.addEventListener('click', clearLogs)
 }
 
@@ -432,6 +434,73 @@ async function clearLogs() {
     } catch (err) {
         console.error('Failed to clear logs:', err)
         updateStatus('清空失败', 'error')
+    }
+}
+
+// Copy logs for AI repair
+async function copyLogsForAI() {
+    try {
+        elements.copyForAIBtn.disabled = true
+        elements.copyForAIBtn.textContent = '正在处理...'
+
+        const response = await chrome.runtime.sendMessage({ type: 'GET_LOGS' })
+        const logs = response?.logs || []
+
+        if (logs.length === 0) {
+            updateStatus('没有可导出的日志', 'warning')
+            return
+        }
+
+        // 优先筛选错误和警告日志，最近 50 条
+        let targetLogs = logs.filter((log: any) => log.level === 'error' || log.level === 'warn')
+
+        // 如果没有错误，通过获取最近的 20 条日志来提供上下文
+        if (targetLogs.length === 0) {
+            targetLogs = logs.slice(-20)
+        } else {
+            // 如果有错误，也带上一些最近的上下文（信息日志），如果它们发生在错误附近
+            // 这里简单处理：取最后 50 条错误，防止太长
+            targetLogs = targetLogs.slice(-50)
+        }
+
+        const timestamp = new Date().toISOString()
+        const manifest = chrome.runtime.getManifest()
+
+        const markdown = [
+            '## Page Agent Error Logs Report',
+            `**Generated at:** ${timestamp}`,
+            `**Extension Version:** ${manifest.version}`,
+            '',
+            '### Issue Description',
+            'Please analyze the following logs and identify the root cause of the failure. Pay special attention to the stack traces and error codes.',
+            '',
+            '### Logs',
+            '```json',
+            JSON.stringify(targetLogs, null, 2),
+            '```',
+            '',
+            '### Config Summary',
+            '```json',
+            JSON.stringify({
+                llm: { ...currentConfig.llm, apiKey: '***HIDDEN***' },
+                ui: currentConfig.ui,
+                tools: {
+                    enabledCount: currentConfig.tools.enabled.length,
+                    disabled: currentConfig.tools.disabledTools
+                }
+            }, null, 2),
+            '```'
+        ].join('\n')
+
+        await navigator.clipboard.writeText(markdown)
+        updateStatus('已复制日志到剪贴板！可直接粘贴给 AI', 'success')
+
+    } catch (err) {
+        console.error('Failed to copy logs:', err)
+        updateStatus('复制失败，请查看控制台', 'error')
+    } finally {
+        elements.copyForAIBtn.disabled = false
+        elements.copyForAIBtn.textContent = '🤖 复制日志给 AI 修复'
     }
 }
 

@@ -1,5 +1,19 @@
 // Message types for communication between extension components
 
+/**
+ * 任务状态枚举
+ */
+export enum TaskStatus {
+    IDLE = 'idle',           // 空闲
+    STARTING = 'starting',   // 启动中
+    THINKING = 'thinking',   // AI推理中
+    EXECUTING = 'executing', // 执行工具中
+    PAUSED = 'paused',       // 已暂停
+    COMPLETED = 'completed', // 已完成
+    FAILED = 'failed',       // 已失败
+    STOPPING = 'stopping',   // 停止中
+}
+
 export const MESSAGE_TYPES = {
     // From popup to content script
     EXECUTE_TASK: 'EXECUTE_TASK',
@@ -13,6 +27,10 @@ export const MESSAGE_TYPES = {
     TASK_COMPLETED: 'TASK_COMPLETED',
     TASK_ERROR: 'TASK_ERROR',
     TASK_THINKING: 'TASK_THINKING',
+    TASK_STATUS_CHANGE: 'TASK_STATUS_CHANGE', // 新增：状态变更通知
+
+    // Task lifecycle
+    TASK_STOPPED: 'TASK_STOPPED',  // 新增：任务已停止确认
 
     // Configuration
     CONFIG_UPDATED: 'CONFIG_UPDATED',
@@ -21,6 +39,7 @@ export const MESSAGE_TYPES = {
     // Debugger interactions
     DEBUGGER_CLICK: 'DEBUGGER_CLICK',
     DEBUGGER_TYPE: 'DEBUGGER_TYPE',
+    DEBUGGER_PRESS_KEY: 'DEBUGGER_PRESS_KEY',
 
     // Status
     GET_STATUS: 'GET_STATUS',

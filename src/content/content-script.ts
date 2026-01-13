@@ -217,6 +217,13 @@ function stopTask() {
         pageAgent.dispose('USER_STOPPED')
         pageAgent = null
     }
+    isExecuting = false
+    // 发送停止确认给后台，以便清理状态
+    chrome.runtime.sendMessage(createMessage({
+        type: MESSAGE_TYPES.TASK_STOPPED
+    } as any)).catch(() => {
+        // 忽略发送失败（可能后台不可达）
+    })
 }
 
 // Create PageAgent instance with config
@@ -263,6 +270,22 @@ async function createPageAgent(config: ExtensionConfig, initialHistory?: any[]):
                 type: MESSAGE_TYPES.TASK_THINKING,
                 status,
             } as any))
+        },
+        onDispose: function (reason?: string) {
+            // When page is unloading, synchronously save history to background
+            if (reason === 'PAGE_UNLOADING' && this.history && this.history.length > 0) {
+                console.log('[PageAgent] Page unloading, saving history:', this.history.length, 'items')
+                // Use sendMessage - Chrome will queue it even during unload
+                chrome.runtime.sendMessage(createMessage({
+                    type: MESSAGE_TYPES.TASK_HEARTBEAT,
+                    payload: {
+                        history: this.history,
+                        status: 'navigating'
+                    }
+                } as any)).catch(() => {
+                    // Ignore errors during unload
+                })
+            }
         },
     })
 

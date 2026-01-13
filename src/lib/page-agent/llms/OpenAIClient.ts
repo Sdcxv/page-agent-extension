@@ -25,60 +25,72 @@ export class OpenAIClient implements LLMClient {
 		// 1. Convert tools to OpenAI format
 		const openaiTools = Object.entries(tools).map(([name, tool]) => zodToOpenAITool(name, tool))
 
-		// 2. Call API
-		let response: Response
-		try {
-			response = await fetch(`${this.config.baseURL}/chat/completions`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Authorization: `Bearer ${this.config.apiKey}`,
-				},
-				body: JSON.stringify(
-					modelPatch({
-						model: this.config.model,
-						temperature: this.config.temperature,
-						messages,
+		// 2. Prepare request options
+		const url = `${this.config.baseURL}/chat/completions`
+		const body = JSON.stringify(
+			modelPatch({
+				model: this.config.model,
+				temperature: this.config.temperature,
+				messages,
 
-						tools: openaiTools,
-						// tool_choice: 'required',
-						tool_choice: { type: 'function', function: { name: 'AgentOutput' } },
+				tools: openaiTools,
+				// tool_choice: 'required',
+				tool_choice: { type: 'function', function: { name: 'AgentOutput' } },
 
-						// model specific params
+				// model specific params
 
-						// reasoning_effort: 'minimal',
-						// verbosity: 'low',
-						parallel_tool_calls: false,
-					})
-				),
-				signal: abortSignal,
+				// reasoning_effort: 'minimal',
+				// verbosity: 'low',
+				parallel_tool_calls: false,
 			})
-		} catch (error: unknown) {
-			// Network error
-			throw new InvokeError(InvokeErrorType.NETWORK_ERROR, 'Network request failed', error)
+		)
+		const headers = {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${this.config.apiKey}`,
 		}
 
-		// 3. Handle HTTP errors
-		if (!response.ok) {
-			const errorData = await response.json().catch()
-			const errorMessage =
-				(errorData as { error?: { message?: string } }).error?.message || response.statusText
+		// 3. Call API via Proxy (Background Script) to avoid CORS/CSP issues
+		let proxyResponse: any
+		try {
+			const { MESSAGE_TYPES } = await import('../../messages')
 
-			if (response.status === 401 || response.status === 403) {
+			proxyResponse = await chrome.runtime.sendMessage({
+				type: MESSAGE_TYPES.PROXY_FETCH,
+				payload: {
+					url,
+					options: {
+						method: 'POST',
+						headers,
+						body
+					}
+				}
+			})
+		} catch (error: unknown) {
+			// Network error or extension messaging error
+			throw new InvokeError(InvokeErrorType.NETWORK_ERROR, 'Network request failed (Proxy)', error)
+		}
+
+		// 4. Handle HTTP errors from Proxy Response
+		if (!proxyResponse || !proxyResponse.ok) {
+			const errorData = proxyResponse?.data
+			const errorMessage = proxyResponse?.error || errorData?.error?.message || proxyResponse?.statusText || 'Unknown error'
+			const status = proxyResponse?.status || 0
+
+			if (status === 401 || status === 403) {
 				throw new InvokeError(
 					InvokeErrorType.AUTH_ERROR,
 					`Authentication failed: ${errorMessage}`,
 					errorData
 				)
 			}
-			if (response.status === 429) {
+			if (status === 429) {
 				throw new InvokeError(
 					InvokeErrorType.RATE_LIMIT,
 					`Rate limit exceeded: ${errorMessage}`,
 					errorData
 				)
 			}
-			if (response.status >= 500) {
+			if (status >= 500) {
 				throw new InvokeError(
 					InvokeErrorType.SERVER_ERROR,
 					`Server error: ${errorMessage}`,
@@ -87,12 +99,12 @@ export class OpenAIClient implements LLMClient {
 			}
 			throw new InvokeError(
 				InvokeErrorType.UNKNOWN,
-				`HTTP ${response.status}: ${errorMessage}`,
+				`HTTP ${status}: ${errorMessage}`,
 				errorData
 			)
 		}
 
-		const data = await response.json()
+		const data = proxyResponse.data
 
 		// 4. Check finish_reason
 		const choice = data.choices?.[0]

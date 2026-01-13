@@ -10,6 +10,7 @@ import {
 	clickElement,
 	getElementByIndex,
 	inputTextElement,
+	pressKeys,
 	scrollHorizontally,
 	scrollVertically,
 	selectOptionElement,
@@ -323,6 +324,24 @@ export class PageController extends EventTarget {
 			return {
 				success: false,
 				message: `❌ Error executing JavaScript: ${error}`,
+			}
+		}
+	}
+
+	/**
+	 * Press keys
+	 */
+	async pressKeys(keys: string[]): Promise<ActionResult> {
+		try {
+			const message = await pressKeys(keys, this.config.interactionMode)
+			return {
+				success: true,
+				message,
+			}
+		} catch (error) {
+			return {
+				success: false,
+				message: `❌ Failed to press keys: ${error}`,
 			}
 		}
 	}

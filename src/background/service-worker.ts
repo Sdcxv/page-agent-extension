@@ -1,6 +1,6 @@
 // Background Service Worker for Page Agent Extension
 
-import { MESSAGE_TYPES, type ExtensionMessage, createMessage } from '../lib/messages'
+import { MESSAGE_TYPES, TaskStatus, type ExtensionMessage, createMessage } from '../lib/messages'
 import { getConfig, isUsingDefaultConfig } from '../lib/storage'
 
 // Keep track of active tabs running tasks
@@ -9,7 +9,7 @@ interface TaskState {
     startTime: number;
     task: string;
     history: any[];
-    status: string;
+    status: TaskStatus;  // 使用枚举类型
 }
 
 // Helper to handle task state persistence
@@ -51,8 +51,8 @@ const logStorage = {
     async addLog(log: Omit<LogEntry, 'timestamp'>) {
         const logs = await this.getLogs()
         logs.push({ ...log, timestamp: Date.now() })
-        // Keep only last 1000 logs
-        const trimmed = logs.slice(-1000)
+        // Keep only last 10000 logs (increased from 1000)
+        const trimmed = logs.slice(-10000)
         await chrome.storage.local.set({ page_agent_logs: trimmed })
     },
     async clearLogs() {
@@ -71,8 +71,15 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     if (changeInfo.status === 'complete') {
         const state = await storage.getTask(tabId);
-        if (state) {
-            console.log('[PageAgent BG] Tab updated, instantly resuming task:', tabId);
+        // 只有状态不是已完成/已失败/停止中才恢复
+        const terminalStatuses: TaskStatus[] = [
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.STOPPING,
+            TaskStatus.IDLE
+        ];
+        if (state && !terminalStatuses.includes(state.status)) {
+            console.log('[PageAgent BG] Tab updated, resuming task:', tabId, 'status:', state.status);
             // Send resume message immediately when status is complete
             chrome.tabs.sendMessage(tabId, createMessage({
                 type: MESSAGE_TYPES.EXECUTE_TASK,
@@ -81,6 +88,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             } as any)).catch(err => {
                 console.warn('[PageAgent BG] Immediate resume failed, might be too early:', err);
             });
+        } else if (state) {
+            // 任务已结束，清理状态
+            console.log('[PageAgent BG] Task in terminal state, cleaning up:', tabId, 'status:', state.status);
+            await storage.removeTask(tabId);
         }
     }
 });
@@ -110,11 +121,11 @@ async function handleMessage(
                         startTime: Date.now(),
                         task: payload.task || '',
                         history: [],
-                        status: 'started'
+                        status: TaskStatus.STARTING
                     })
                 } else {
                     console.log('[PageAgent BG] Task already known, skipping re-init:', payload.task)
-                    existing.status = 'resumed'
+                    existing.status = TaskStatus.EXECUTING
                     await storage.setTask(tabId, existing)
                 }
             }
@@ -148,10 +159,63 @@ async function handleMessage(
             break
 
         case MESSAGE_TYPES.TASK_COMPLETED:
+            if (sender.tab?.id) {
+                const state = await storage.getTask(sender.tab.id)
+                if (state) {
+                    state.status = TaskStatus.COMPLETED
+                    await storage.setTask(sender.tab.id, state)
+                }
+                // 延迟清理，给其他组件时间读取最终状态
+                setTimeout(async () => {
+                    await storage.removeTask(sender.tab!.id!)
+                }, 1000)
+            }
+            break
+
         case MESSAGE_TYPES.TASK_ERROR:
             if (sender.tab?.id) {
+                const state = await storage.getTask(sender.tab.id)
+                if (state) {
+                    state.status = TaskStatus.FAILED
+                    await storage.setTask(sender.tab.id, state)
+                }
+                // 延迟清理
+                setTimeout(async () => {
+                    await storage.removeTask(sender.tab!.id!)
+                }, 1000)
+            }
+            break
+
+        case MESSAGE_TYPES.TASK_STOPPED:
+            // 任务已确认停止，清理状态
+            if (sender.tab?.id) {
+                console.log('[PageAgent BG] Task stopped confirmed, cleaning up:', sender.tab.id)
                 await storage.removeTask(sender.tab.id)
             }
+            sendResponse({ success: true })
+            break
+
+        case MESSAGE_TYPES.STOP_TASK:
+            // 处理来自 popup 的停止请求
+            const stopTabId = (message as any).payload?.tabId
+            if (stopTabId) {
+                const state = await storage.getTask(stopTabId)
+                if (state) {
+                    state.status = TaskStatus.STOPPING
+                    await storage.setTask(stopTabId, state)
+                    // 向 content script 发送停止命令
+                    try {
+                        await chrome.tabs.sendMessage(stopTabId, createMessage({
+                            type: MESSAGE_TYPES.STOP_TASK
+                        }))
+                    } catch (e) {
+                        // content script 不可达，直接清理
+                        console.log('[PageAgent BG] Content script unreachable, cleaning up directly')
+                        await storage.removeTask(stopTabId)
+                    }
+                }
+            }
+            sendResponse({ success: true })
             break
 
         case MESSAGE_TYPES.GET_STATUS:
@@ -235,10 +299,14 @@ async function handleMessage(
             break
 
         case MESSAGE_TYPES.DEBUGGER_CLICK:
+            console.log('[PageAgent BG] Received DEBUGGER_CLICK from tab:', sender.tab?.id, 'payload:', (message as any).payload)
             if (sender.tab?.id) {
                 const { x, y } = (message as any).payload
                 await performDebuggerClick(sender.tab.id, x, y)
                 sendResponse({ success: true })
+            } else {
+                console.error('[PageAgent BG] DEBUGGER_CLICK: No tab id in sender')
+                sendResponse({ success: false, error: 'No tab id' })
             }
             break
 
@@ -246,6 +314,14 @@ async function handleMessage(
             if (sender.tab?.id) {
                 const { text } = (message as any).payload
                 await performDebuggerType(sender.tab.id, text)
+                sendResponse({ success: true })
+            }
+            break
+
+        case MESSAGE_TYPES.DEBUGGER_PRESS_KEY:
+            if (sender.tab?.id) {
+                const { key } = (message as any).payload
+                await performDebuggerPressKey(sender.tab.id, key)
                 sendResponse({ success: true })
             }
             break
@@ -327,6 +403,93 @@ async function performDebuggerType(tabId: number, text: string) {
     } catch (error) {
         console.error('[PageAgent BG] Debugger type error:', error);
         try { await chrome.debugger.detach(target); } catch (e) { }
+    }
+}
+
+async function performDebuggerPressKey(tabId: number, key: string) {
+    const target = { tabId };
+    try {
+        try {
+            await chrome.debugger.attach(target, '1.3');
+        } catch (e: any) {
+            if (!e.message.includes('Already attached')) throw e;
+        }
+
+        console.log(`[PageAgent BG] Debugger pressing key: "${key}"`);
+
+        const keyDefinition = getKeyDefinition(key);
+
+        await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            ...keyDefinition
+        });
+
+        await new Promise(r => setTimeout(r, 50));
+
+        await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            ...keyDefinition
+        });
+
+        await chrome.debugger.detach(target);
+    } catch (error) {
+        console.error('[PageAgent BG] Debugger press key error:', error);
+        try { await chrome.debugger.detach(target); } catch (e) { }
+    }
+}
+
+function getKeyDefinition(key: string): any {
+    switch (key.toLowerCase()) {
+        case 'enter':
+            return {
+                windowsVirtualKeyCode: 13,
+                nativeVirtualKeyCode: 13,
+                macCharCode: 13,
+                unmodifiedText: '\r',
+                text: '\r',
+                key: 'Enter',
+                code: 'Enter'
+            };
+        case 'backspace':
+            return {
+                windowsVirtualKeyCode: 8,
+                nativeVirtualKeyCode: 8,
+                macCharCode: 8,
+                unmodifiedText: '\u0008',
+                text: '\u0008',
+                key: 'Backspace',
+                code: 'Backspace'
+            };
+        case 'tab':
+            return {
+                windowsVirtualKeyCode: 9,
+                nativeVirtualKeyCode: 9,
+                macCharCode: 9,
+                unmodifiedText: '\t',
+                text: '\t',
+                key: 'Tab',
+                code: 'Tab'
+            };
+        case 'escape':
+            return {
+                windowsVirtualKeyCode: 27,
+                nativeVirtualKeyCode: 27,
+                macCharCode: 27,
+                key: 'Escape',
+                code: 'Escape'
+            };
+        // Add more keys as needed
+        default:
+            // Fallback for single characters
+            if (key.length === 1) {
+                return {
+                    text: key,
+                    unmodifiedText: key,
+                    key: key,
+                    code: `Key${key.toUpperCase()}`
+                }
+            }
+            return { text: key };
     }
 }
 

@@ -24,7 +24,7 @@ export type PanelUpdate =
 	| { type: 'question'; question: string }
 	| { type: 'userAnswer'; input: string }
 	| { type: 'retry'; current: number; max: number }
-	| { type: 'error'; message: string }
+	| { type: 'error'; message: string; errorCode?: string; recoverySuggestion?: string }
 	| { type: 'output'; text: string }
 	| { type: 'completed' }
 	| { type: 'toolExecuting'; toolName: string; args: any }
@@ -235,8 +235,14 @@ export class Panel {
 				}
 			case 'retry':
 				return { type: 'retry', displayText: `retry-ing (${data.current} / ${data.max})` }
-			case 'error':
-				return { type: 'error', displayText: data.message }
+			case 'error': {
+				// 构建错误显示内容，包含恢复建议
+				let displayText = data.message
+				if (data.recoverySuggestion) {
+					displayText += `\n💡 ${data.recoverySuggestion}`
+				}
+				return { type: 'error', displayText }
+			}
 			case 'output':
 				return { type: 'output', displayText: data.text }
 			case 'completed':
@@ -501,7 +507,7 @@ export class Panel {
 			</div>
 		`
 
-		document.body.appendChild(wrapper)
+		// Don't append here - let constructor's #safeAppend handle it safely
 		return wrapper
 	}
 

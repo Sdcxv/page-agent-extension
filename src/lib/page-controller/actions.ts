@@ -62,6 +62,7 @@ function blurLastClickedElement() {
  * Simulate a click on the element
  */
 export async function clickElement(element: HTMLElement, mode: 'simulated' | 'debugger' = 'simulated') {
+	console.log(`[PageAgent Actions] clickElement called with mode: ${mode}, element:`, element.tagName)
 	blurLastClickedElement()
 
 	lastClickedElement = element
@@ -94,7 +95,7 @@ export async function clickElement(element: HTMLElement, mode: 'simulated' | 'de
 			}, (response) => {
 				// Restore mask events
 				if (mask) mask.style.setProperty('pointer-events', 'auto', 'important')
-				console.log('[PageAgent Content] Debugger click finished', response);
+				console.log('[PageAgent Actions] Debugger click response:', response, 'chrome.runtime.lastError:', chrome.runtime.lastError);
 				resolve(response);
 			})
 		})
@@ -154,13 +155,17 @@ export async function inputTextElement(element: HTMLElement, text: string, mode:
 	await clickElement(element, mode)
 
 	if (mode === 'debugger') {
+		console.log(`[PageAgent Actions] Debugger typing text: "${text}"`)
 		// Use chrome.runtime.sendMessage for debugger typing via background worker
 		await new Promise((resolve) => {
 			chrome.runtime.sendMessage({
 				type: 'DEBUGGER_TYPE',
 				payload: { text },
 				timestamp: Date.now()
-			}, (response) => resolve(response))
+			}, (response) => {
+				console.log('[PageAgent Actions] Debugger type response:', response, 'chrome.runtime.lastError:', chrome.runtime.lastError);
+				resolve(response)
+			})
 		})
 	} else {
 		if (element instanceof HTMLTextAreaElement) {
@@ -455,4 +460,32 @@ export async function scrollHorizontally(
 		await waitFor(0.1) // Animation playback
 		return `✅ Scrolled container (${el!.tagName}) horizontally by ${dx}px`
 	}
+}
+
+export async function pressKeys(keys: string[], mode: 'simulated' | 'debugger' = 'simulated') {
+	const results: string[] = []
+
+	for (const key of keys) {
+		if (mode === 'debugger') {
+			await new Promise((resolve) => {
+				chrome.runtime.sendMessage({
+					type: 'DEBUGGER_PRESS_KEY',
+					payload: { key },
+					timestamp: Date.now()
+				}, (response) => resolve(response))
+			})
+			results.push(key)
+		} else {
+			// Simulated mode fallback (mostly for testing, less reliable for specialized keys like Enter on forms)
+			// We can try to use active element
+			const activeElement = document.activeElement as HTMLElement
+			if (activeElement) {
+				await createSyntheticInputEvent(activeElement, key)
+				results.push(key)
+			}
+		}
+		await waitFor(0.1)
+	}
+
+	return `✅ Pressed keys: ${results.join(', ')}`
 }

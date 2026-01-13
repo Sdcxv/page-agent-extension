@@ -27,6 +27,7 @@ import SYSTEM_PROMPT from './prompts/system_prompt.md?raw'
 import { tools, type PageAgentTool } from './tools'
 import { trimLines, uid, waitUntil } from './utils'
 import { assert } from './utils/assert'
+import { AgentError, AgentErrorCode } from './AgentError'
 
 export type { PageAgentConfig }
 export { tool, type PageAgentTool } from './tools'
@@ -162,13 +163,30 @@ export class PageAgent extends EventTarget {
 	}
 
 	#log(message: string, level: 'info' | 'warn' | 'error' | 'debug' = 'info', details?: any) {
+		// 如果 details 包含 Error 对象，提取堆栈信息
+		let logDetails = details
+		if (details instanceof Error) {
+			logDetails = {
+				errorMessage: details.message,
+				errorStack: details.stack,
+				...(details instanceof AgentError ? details.toLogObject() : {})
+			}
+		} else if (details?.error instanceof Error) {
+			logDetails = {
+				...details,
+				errorMessage: details.error.message,
+				errorStack: details.error.stack,
+				...(details.error instanceof AgentError ? details.error.toLogObject() : {})
+			}
+		}
+
 		chrome.runtime.sendMessage({
 			type: 'LOG_EVENT',
 			payload: {
 				level,
 				source: 'Agent',
 				message,
-				details
+				details: logDetails
 			}
 		}).catch(() => { }) // Ignore if channel closed
 	}
@@ -306,19 +324,30 @@ export class PageAgent extends EventTarget {
 				}
 			}
 		} catch (error: any) {
-			if (error?.message === 'AbortError') {
+			// 将错误包装为 AgentError
+			const agentError = AgentError.fromError(error, {
+				task: this.task,
+				step: this.history.length,
+			})
+
+			if (agentError.code === AgentErrorCode.TASK_ABORTED || error?.message === 'AbortError') {
 				console.log('Task aborted:', this.#abortController.signal.reason)
+				this.#log('Task aborted', 'info', { reason: this.#abortController.signal.reason })
 				return {
 					success: false,
 					data: `Aborted: ${this.#abortController.signal.reason}`,
 					history: this.history,
 				}
 			}
-			console.error('Task failed', error)
-			this.#onDone(String(error), false)
+
+			// 记录详细错误日志（包含堆栈）
+			this.#log(`Task failed: ${agentError.userMessage}`, 'error', agentError)
+
+			console.error('Task failed', agentError)
+			this.#onDone(agentError.userMessage, false, agentError)
 			const result: ExecutionResult = {
 				success: false,
-				data: String(error),
+				data: agentError.userMessage,
 				history: this.history,
 			}
 			await onAfterTask.call(this, result)
@@ -484,14 +513,20 @@ Current date and time: ${new Date().toISOString()}
 		return trimLines(prompt)
 	}
 
-	#onDone(text: string, success = true) {
+	#onDone(text: string, success = true, error?: AgentError) {
 		this.pageController.cleanUpHighlights()
 
 		// Update panel status
 		if (success) {
 			this.panel.update({ type: 'output', text })
 		} else {
-			this.panel.update({ type: 'error', message: text })
+			// 传递更详细的错误信息
+			this.panel.update({
+				type: 'error',
+				message: text,
+				errorCode: error?.code,
+				recoverySuggestion: error?.recoverySuggestion,
+			})
 		}
 
 		// Task completed
