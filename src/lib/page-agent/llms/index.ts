@@ -31,7 +31,7 @@
  * - 永远使用 tool call 来返回结构化数据，禁止模型直接返回（视为出错）
  * - 不能假设 tool 参数合法，必须有修复机制，而且修复也应该使用 tool call 返回
  */
-import { OpenAIClient } from './OpenAILenientClient'
+import { OpenAIClient } from './OpenAIClient'
 import {
 	DEFAULT_API_KEY,
 	DEFAULT_BASE_URL,
@@ -42,6 +42,7 @@ import {
 import { InvokeError } from './errors'
 import type {
 	AgentBrain,
+	InvokeOptions,
 	InvokeResult,
 	LLMClient,
 	LLMConfig,
@@ -53,6 +54,7 @@ import type {
 
 export type {
 	AgentBrain,
+	InvokeOptions,
 	InvokeResult,
 	LLMClient,
 	LLMConfig,
@@ -94,11 +96,12 @@ export class LLM extends EventTarget {
 	async invoke(
 		messages: Message[],
 		tools: Record<string, Tool>,
-		abortSignal: AbortSignal
+		abortSignal: AbortSignal,
+		options?: InvokeOptions
 	): Promise<InvokeResult> {
 		return await withRetry(
 			async () => {
-				const result = await this.client.invoke(messages, tools, abortSignal)
+				const result = await this.client.invoke(messages, tools, abortSignal, options)
 
 				return result
 			},

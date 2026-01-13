@@ -134,10 +134,10 @@ async function getCurrentTab() {
 
     // Check if we can run on this tab
     if (tab?.url?.startsWith('chrome://') || tab?.url?.startsWith('chrome-extension://') || tab?.url?.includes('chrome.google.com/webstore')) {
-        console.warn('[Popup] Restricted page detected:', tab.url)
-        updateStatus('受限页面 (无法运行)', 'warning')
+        console.log('[Popup] Restricted page detected (extension disabled):', tab.url)
+        updateStatus('系统页面 (无需运行)', 'info')
         elements.executeBtn.disabled = true
-        elements.executeBtn.title = '此页面受浏览器安全限制，无法运行插件'
+        elements.executeBtn.title = '无需在此页面运行插件'
     } else {
         elements.executeBtn.disabled = false
         elements.executeBtn.title = ''
@@ -421,7 +421,7 @@ function handleTaskError(message: any) {
 }
 
 // Update status banner
-function updateStatus(text: string, type: 'ready' | 'running' | 'success' | 'error' | 'warning' = 'ready') {
+function updateStatus(text: string, type: 'ready' | 'running' | 'success' | 'error' | 'warning' | 'info' = 'ready') {
     elements.statusBanner.className = 'status-banner'
     if (type !== 'ready') {
         elements.statusBanner.classList.add(type)
@@ -433,9 +433,10 @@ function updateStatus(text: string, type: 'ready' | 'running' | 'success' | 'err
         success: '✅',
         error: '❌',
         warning: '⚠️',
+        info: '🛡️',
     }
 
-    elements.statusIcon.textContent = icons[type]
+    elements.statusIcon.textContent = icons[type] || '✨'
     elements.statusText.textContent = text
 }
 

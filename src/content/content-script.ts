@@ -164,10 +164,19 @@ async function handleMessage(message: ExtensionMessage, sendResponse: (response:
 // Execute a task
 async function executeTask(task: string, initialHistory?: any[]) {
     if (isExecuting) {
-        // If it's a resume request but we're already running, maybe update history?
-        // But usually it's a duplicate message.
         console.log('[PageAgent] Task already executing, ignoring request')
         return
+    }
+
+    // Critical: Clean up previous agent if exists to avoid checking duplications and UI conflicts
+    if (pageAgent) {
+        console.log('[PageAgent] Disposing previous agent before starting new task')
+        try {
+            pageAgent.dispose('STARTING_NEW_TASK')
+        } catch (e) {
+            console.warn('Error disposing old agent:', e)
+        }
+        pageAgent = null
     }
 
     try {
@@ -189,7 +198,10 @@ async function executeTask(task: string, initialHistory?: any[]) {
         // Execute the task
         const result = await pageAgent.execute(task)
 
-        // Notify completion
+        // Notify completion - BUT check if it was aborted/stopped first
+        // If result.success is false and data contains "Aborted", we treat it as stopped?
+        // Actually PageAgent.execute catches AbortError and returns specific data.
+        // Let's rely on standard flow.
         chrome.runtime.sendMessage(createMessage({
             type: MESSAGE_TYPES.TASK_COMPLETED,
             success: result.success,
@@ -197,7 +209,7 @@ async function executeTask(task: string, initialHistory?: any[]) {
         }))
     } catch (error: any) {
         if (error.message === 'AbortError') {
-            console.log('[PageAgent] Task execution aborted (expected during navigation)')
+            console.log('[PageAgent] Task execution aborted (expected during navigation/stop)')
             return
         }
         console.error('[PageAgent] Task execution failed:', error)
@@ -214,8 +226,14 @@ async function executeTask(task: string, initialHistory?: any[]) {
 // Stop the current task
 function stopTask() {
     if (pageAgent && !pageAgent.disposed) {
-        pageAgent.dispose('USER_STOPPED')
-        pageAgent = null
+        // Use stop() first to keep UI alive for feedback
+        if (pageAgent.running && typeof pageAgent.stop === 'function') {
+            pageAgent.stop()
+        } else {
+            // Fallback to dispose if not running or old version?
+            pageAgent.dispose('USER_STOPPED')
+            pageAgent = null
+        }
     }
     isExecuting = false
     // 发送停止确认给后台，以便清理状态

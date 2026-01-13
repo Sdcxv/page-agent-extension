@@ -180,7 +180,8 @@ export async function inputTextElement(element: HTMLElement, text: string, mode:
 
 	await waitFor(0.1) // Wait to ensure input event processing completes
 
-	blurLastClickedElement()
+	// Don't blur immediately, so that subsequent press_keys (like Enter) can work on this element behavior
+	// blurLastClickedElement() 
 }
 
 /**

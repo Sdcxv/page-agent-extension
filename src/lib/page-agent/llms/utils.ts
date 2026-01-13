@@ -193,21 +193,30 @@ export function lenientParseMacroToolCall(
 
 export function modelPatch(body: Record<string, any>) {
 	const model: string = body.model || ''
-	const modelLower = model.toLowerCase()
+	const modelName = normalizeModelName(model)
 
-	// 1. Anthropic models
-	if (modelLower.startsWith('claude') || modelLower.includes('anthropic/')) {
-		if (modelLower.includes('/')) {
-			body.tool_choice = 'required'
-		} else {
-			body.tool_choice = { type: 'function', function: { name: 'AgentOutput' } }
-		}
+	// 1. Qwen 模型优化
+	if (modelName.startsWith('qwen')) {
+		console.log('Applying Qwen patch: use higher temperature for auto fixing')
+		body.temperature = Math.max(body.temperature || 0, 1.0)
+	}
+
+	// 2. Anthropic models
+	if (modelName.startsWith('claude')) {
+		console.log('Applying Claude patch: disable thinking')
 		body.thinking = { type: 'disabled' }
+
+		// Convert tool_choice to Claude format
+		if (body.tool_choice === 'required') {
+			body.tool_choice = { type: 'any' }
+		} else if (body.tool_choice?.function?.name) {
+			body.tool_choice = { type: 'tool', name: body.tool_choice.function.name }
+		}
 		return body
 	}
 
-	// 2. Grok models
-	if (modelLower.includes('grok')) {
+	// 3. Grok models
+	if (modelName.includes('grok')) {
 		console.log('Applying Grok patch: removing tool_choice')
 		delete body.tool_choice
 		body.thinking = { type: 'disabled', effort: 'minimal' }
@@ -215,35 +224,51 @@ export function modelPatch(body: Record<string, any>) {
 		return body
 	}
 
-	// 3. Reasoning models (DeepSeek R1, OpenAI O-series) - No Tool Support on many providers
+	// 4. Reasoning models (DeepSeek R1, OpenAI O-series) - No Tool Support on many providers
 	if (
-		modelLower.includes('reasoner') ||
-		modelLower.includes('r1') ||
-		modelLower.includes('o1-') ||
-		modelLower.includes('o3-') ||
-		(modelLower.startsWith('o1') && !modelLower.includes('mini')) // o1-mini supports tools, o1-preview/o1 might not always
+		modelName.includes('reasoner') ||
+		modelName.includes('r1') ||
+		modelName.includes('o1-') ||
+		modelName.includes('o3-') ||
+		(modelName.startsWith('o1') && !modelName.includes('mini'))
 	) {
 		console.log('Applying reasoning model patch: disabling tools and tool_choice')
 		delete body.tools
 		delete body.tool_choice
-		// These models often output thinking automatically or expect it enabled
 		return body
 	}
 
-	// 4. OpenRouter / Google / DeepSeek / Meta / Mistral - Common providers that prefer 'required' string
-	// If it's not a pure OpenAI model (which we assume gpt-3.5/4/4o are)
+	// 5. GPT models
+	if (modelName.startsWith('gpt')) {
+		console.log('Applying GPT patch: set verbosity to low')
+		body.verbosity = 'low'
+
+		if (modelName.startsWith('gpt52')) {
+			body.reasoning_effort = 'none'
+		} else if (modelName.startsWith('gpt51')) {
+			body.reasoning_effort = 'none'
+		} else if (modelName.startsWith('gpt5')) {
+			body.reasoning_effort = 'low'
+		}
+		return body
+	}
+
+	// 6. Gemini models
+	if (modelName.startsWith('gemini')) {
+		console.log('Applying Gemini patch: set reasoning effort to minimal')
+		body.reasoning_effort = 'minimal'
+	}
+
+	// 7. OpenRouter / Other providers - Common providers that prefer 'required' string
 	if (
-		!modelLower.startsWith('gpt-') &&
-		(modelLower.includes('/') || // OpenRouter format
-			modelLower.includes('gemini') ||
-			modelLower.includes('deepseek') ||
-			modelLower.includes('qwen') ||
-			modelLower.includes('llama') ||
-			modelLower.includes('mistral') ||
-			modelLower.includes('mixtral'))
+		model.includes('/') || // OpenRouter format
+		modelName.includes('deepseek') ||
+		modelName.includes('llama') ||
+		modelName.includes('mistral') ||
+		modelName.includes('mixtral')
 	) {
 		// Specific fix for OpenRouter providers that don't support tool_choice at all
-		if (modelLower.includes(':free') || modelLower.includes('xiaomi/') || modelLower.includes('hf/')) {
+		if (model.includes(':free') || model.includes('xiaomi/') || model.includes('hf/')) {
 			console.log(`Applying specific patch for ${model}: removing tool_choice to avoid 404`)
 			delete body.tool_choice
 		} else {
@@ -254,3 +279,33 @@ export function modelPatch(body: Record<string, any>) {
 
 	return body
 }
+
+/**
+ * Normalize model name for consistent matching
+ * 
+ * Different model providers may use different model IDs for the same model.
+ * For example, openai's `gpt-5.2` may called:
+ *   - `gpt-5.2-version`
+ *   - `gpt-5_2-date`
+ *   - `GPT-52-version-date`
+ *   - `openai/gpt-5.2-chat`
+ *
+ * They should be treated as the same model. Normalize them to `gpt52`
+ */
+function normalizeModelName(modelName: string): string {
+	let normalizedName = modelName.toLowerCase()
+
+	// remove prefix before '/'
+	if (normalizedName.includes('/')) {
+		normalizedName = normalizedName.split('/')[1]
+	}
+
+	// remove '_'
+	normalizedName = normalizedName.replace(/_/g, '')
+
+	// remove '.'
+	normalizedName = normalizedName.replace(/\./g, '')
+
+	return normalizedName
+}
+

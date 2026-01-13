@@ -499,7 +499,13 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 })
 
 // Listen for extension installation
+// Listen for extension installation
 chrome.runtime.onInstalled.addListener(async (details) => {
+    // Always clear active tasks on reload/update to prevent zombie states
+    // This addresses the issue where tasks appear "still running" after extension reload
+    await chrome.storage.local.remove('activeTasks')
+    console.log('[PageAgent] Cleared active tasks due to extension event:', details.reason)
+
     if (details.reason === 'install') {
         console.log('[PageAgent] Extension installed')
         // Open options page on first install

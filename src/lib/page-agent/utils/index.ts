@@ -82,3 +82,5 @@ export function uid() {
 	ids.push(id)
 	return id
 }
+
+export * from './autoFixer'

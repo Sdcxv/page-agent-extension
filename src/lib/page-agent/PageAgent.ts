@@ -25,7 +25,7 @@ import { MAX_STEPS } from './config/constants'
 import { LLM, type Tool } from './llms'
 import SYSTEM_PROMPT from './prompts/system_prompt.md?raw'
 import { tools, type PageAgentTool } from './tools'
-import { trimLines, uid, waitUntil } from './utils'
+import { normalizeResponse, trimLines, uid, waitUntil } from './utils'
 import { assert } from './utils/assert'
 import { AgentError, AgentErrorCode } from './AgentError'
 
@@ -95,6 +95,9 @@ export class PageAgent extends EventTarget {
 	#llmErrorListener: ((e: Event) => void) | null = null
 	#beforeUnloadListener: ((e: Event) => void) | null = null
 
+	/** Executive state flag */
+	running = false
+
 	/** PageController for DOM operations */
 	pageController: PageController
 
@@ -111,7 +114,14 @@ export class PageAgent extends EventTarget {
 		this.panel = new Panel({
 			language: this.config.language,
 			onExecuteTask: (task) => this.execute(task),
-			onStop: () => this.dispose(),
+			onStop: () => {
+				// 2-stage stop: Stop execution if running, otherwise dispose panel
+				if (this.running) {
+					this.stop()
+				} else {
+					this.dispose('USER_DISPOSED')
+				}
+			},
 			onPauseToggle: () => {
 				this.paused = !this.paused
 				return this.paused
@@ -192,12 +202,25 @@ export class PageAgent extends EventTarget {
 	}
 
 	/**
+	 * Stop the current execution but keep the agent alive
+	 */
+	stop() {
+		if (this.disposed || !this.running) return
+		console.log('[PageAgent] User requested stop')
+		this.#abortController.abort('USER_STOPPED')
+		this.running = false
+		this.mask.hide()
+		// The execute() catch block will handle the UI update
+	}
+
+	/**
 	 * @todo maybe return something?
 	 */
 	async execute(task: string): Promise<ExecutionResult> {
 		if (!task) throw new Error('Task is required')
 		this.task = task
 		this.taskId = uid()
+		this.running = true
 
 		const onBeforeStep = this.config.onBeforeStep || (() => void 0)
 		const onAfterStep = this.config.onAfterStep || (() => void 0)
@@ -266,7 +289,11 @@ export class PageAgent extends EventTarget {
 						},
 					],
 					{ AgentOutput: this.#packMacroTool() },
-					this.#abortController.signal
+					this.#abortController.signal,
+					{
+						toolChoiceName: 'AgentOutput',
+						normalizeResponse,
+					}
 				)
 				console.log('[PageAgent] LLM result received:', result)
 
@@ -324,6 +351,20 @@ export class PageAgent extends EventTarget {
 				}
 			}
 		} catch (error: any) {
+			const errorMessage = error?.message || String(error)
+
+			// Critical: If execution fails due to navigation/BFCache, re-throw as AbortError
+			// so content-script catches it and finishes silently, allowing BG to resume later.
+			if (
+				errorMessage.includes('back/forward cache') ||
+				errorMessage.includes('Extension context invalidated') ||
+				errorMessage.includes('message channel is closed') ||
+				errorMessage.includes('Failed to fetch') // Often occurs during unload
+			) {
+				console.log('[PageAgent] Transient error detected (navigation?), treating as silent abort:', errorMessage)
+				throw new Error('AbortError')
+			}
+
 			// 将错误包装为 AgentError
 			const agentError = AgentError.fromError(error, {
 				task: this.task,
@@ -332,6 +373,12 @@ export class PageAgent extends EventTarget {
 
 			if (agentError.code === AgentErrorCode.TASK_ABORTED || error?.message === 'AbortError') {
 				console.log('Task aborted:', this.#abortController.signal.reason)
+
+				// Critical: If page is unloading, throw triggers silent exit in content-script
+				if (this.#abortController.signal.reason === 'PAGE_UNLOADING') {
+					throw new Error('AbortError')
+				}
+
 				this.#log('Task aborted', 'info', { reason: this.#abortController.signal.reason })
 				return {
 					success: false,
@@ -352,6 +399,8 @@ export class PageAgent extends EventTarget {
 			}
 			await onAfterTask.call(this, result)
 			return result
+		} finally {
+			this.running = false
 		}
 	}
 
@@ -514,6 +563,7 @@ Current date and time: ${new Date().toISOString()}
 	}
 
 	#onDone(text: string, success = true, error?: AgentError) {
+		this.running = false
 		this.pageController.cleanUpHighlights()
 
 		// Update panel status

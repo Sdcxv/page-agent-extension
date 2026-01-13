@@ -4,7 +4,7 @@
  * @note Use OpenAILenientClient instead.
  */
 import { InvokeError, InvokeErrorType } from './errors'
-import type { InvokeResult, LLMClient, LLMConfig, Message, Tool } from './types'
+import type { InvokeOptions, InvokeResult, LLMClient, LLMConfig, Message, Tool } from './types'
 import { modelPatch, zodToOpenAITool } from './utils'
 
 /**
@@ -20,7 +20,8 @@ export class OpenAIClient implements LLMClient {
 	async invoke(
 		messages: Message[],
 		tools: Record<string, Tool>,
-		abortSignal?: AbortSignal
+		abortSignal?: AbortSignal,
+		options?: InvokeOptions
 	): Promise<InvokeResult> {
 		// 1. Convert tools to OpenAI format
 		const openaiTools = Object.entries(tools).map(([name, tool]) => zodToOpenAITool(name, tool))
@@ -34,8 +35,10 @@ export class OpenAIClient implements LLMClient {
 				messages,
 
 				tools: openaiTools,
-				// tool_choice: 'required',
-				tool_choice: { type: 'function', function: { name: 'AgentOutput' } },
+				// Require tool call: specific tool if provided, otherwise any tool
+				tool_choice: options?.toolChoiceName
+					? { type: 'function', function: { name: options.toolChoiceName } }
+					: 'required',
 
 				// model specific params
 
@@ -66,6 +69,17 @@ export class OpenAIClient implements LLMClient {
 				}
 			})
 		} catch (error: unknown) {
+			const errorMessage = (error as Error)?.message || String(error)
+
+			// Handle implementation updates causing context invalidation
+			if (errorMessage.includes('Extension context invalidated')) {
+				throw new InvokeError(
+					InvokeErrorType.NETWORK_ERROR,
+					'Extension updated/reloaded. Please refresh the page to reconnect.',
+					error
+				)
+			}
+
 			// Network error or extension messaging error
 			throw new InvokeError(InvokeErrorType.NETWORK_ERROR, 'Network request failed (Proxy)', error)
 		}
@@ -114,7 +128,9 @@ export class OpenAIClient implements LLMClient {
 
 		switch (choice.finish_reason) {
 			case 'tool_calls':
-				// ✅ Normal
+			case 'function_call': // gemini
+			case 'stop': // some models use this even with tool calls
+				// ✅ Normal - will try to parse
 				break
 			case 'length':
 				// ⚠️ Token limit reached
@@ -130,9 +146,6 @@ export class OpenAIClient implements LLMClient {
 					'Content filtered by safety system',
 					data
 				)
-			case 'stop':
-				// ❌ Did not call tool (we require tool call)
-				throw new InvokeError(InvokeErrorType.NO_TOOL_CALL, 'Model did not call any tool', data)
 			default:
 				throw new InvokeError(
 					InvokeErrorType.UNKNOWN,
@@ -141,8 +154,13 @@ export class OpenAIClient implements LLMClient {
 				)
 		}
 
+		// Apply normalizeResponse if provided (for fixing format issues automatically)
+		const normalizedData = options?.normalizeResponse ? options.normalizeResponse(data) : data
+		const normalizedChoice = normalizedData.choices?.[0]
+
+
 		// 5. Parse tool call
-		const toolCall = choice.message?.tool_calls?.[0]
+		const toolCall = normalizedChoice.message?.tool_calls?.[0]
 		if (!toolCall) {
 			throw new InvokeError(InvokeErrorType.NO_TOOL_CALL, 'No tool call found in response', data)
 		}
