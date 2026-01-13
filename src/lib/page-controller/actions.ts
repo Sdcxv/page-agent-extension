@@ -12,10 +12,59 @@ async function waitFor(seconds: number): Promise<void> {
 
 // ======= dom utils =======
 
+// ======= dom utils =======
+
+/**
+ * Calculates the center coordinates of an element relative to the TOP-LEVEL viewport.
+ * This handles elements inside nested iframes by accumulating offsets.
+ */
+function getGlobalElementCenter(element: HTMLElement): { x: number, y: number } {
+	let x = 0
+	let y = 0
+	let currentElement: HTMLElement | null = element
+
+	// Start with the element's local rect in its own document/frame
+	const localRect = element.getBoundingClientRect()
+	x = localRect.left + localRect.width / 2
+	y = localRect.top + localRect.height / 2
+
+	// Traverse up the frame hierarchy
+	// Note: We can only traverse same-origin frames. 
+	// If `dom_tree` gave us an element, it guaranteed it is same-origin (cross-origin access throws error).
+	let currentWindow = element.ownerDocument.defaultView
+
+	while (currentWindow && currentWindow !== window.top) {
+		try {
+			// Get the frame element in the parent window that contains the current text
+			const frameElement = currentWindow.frameElement
+			if (!frameElement) break // Should not happen if not top
+
+			const frameRect = frameElement.getBoundingClientRect()
+
+			// Accumulate offset
+			x += frameRect.left
+			y += frameRect.top
+
+			// Account for border width of the iframe itself (optional but precise)
+			const style = window.getComputedStyle(frameElement)
+			x += parseFloat(style.borderLeftWidth) || 0
+			y += parseFloat(style.borderTopWidth) || 0
+
+			// Move up one level
+			currentWindow = currentWindow.parent as Window & typeof globalThis
+		} catch (e) {
+			// Cross-origin access blocked? Stop here.
+			// But normally we shouldn't have reference to `element` if it was deep in cross-origin.
+			console.warn('[PageAgent Actions] Failed to traverse frame hierarchy for coordinates:', e)
+			break
+		}
+	}
+
+	return { x, y }
+}
+
 export async function movePointerToElement(element: HTMLElement) {
-	const rect = element.getBoundingClientRect()
-	const x = rect.left + rect.width / 2
-	const y = rect.top + rect.height / 2
+	const { x, y } = getGlobalElementCenter(element)
 
 	window.dispatchEvent(new CustomEvent('PageAgent::MovePointerTo', { detail: { x, y } }))
 
@@ -63,7 +112,11 @@ function blurLastClickedElement() {
  */
 export async function clickElement(element: HTMLElement, mode: 'simulated' | 'debugger' = 'simulated') {
 	console.log(`[PageAgent Actions] clickElement called with mode: ${mode}, element:`, element.tagName)
-	blurLastClickedElement()
+
+	// Fixed: Do not blur previous element aggressively. 
+	// This causes issues with dropdowns/popovers that close on blur.
+	// Let the browser handle focus transition naturally.
+	// blurLastClickedElement()
 
 	lastClickedElement = element
 	await scrollIntoViewIfNeeded(element)
@@ -76,9 +129,7 @@ export async function clickElement(element: HTMLElement, mode: 'simulated' | 'de
 	await waitFor(0.1)
 
 	if (mode === 'debugger') {
-		const rect = element.getBoundingClientRect()
-		const x = rect.left + rect.width / 2
-		const y = rect.top + rect.height / 2
+		const { x, y } = getGlobalElementCenter(element)
 
 		console.log(`[PageAgent Content] Debugger click at: (${x}, ${y})`);
 

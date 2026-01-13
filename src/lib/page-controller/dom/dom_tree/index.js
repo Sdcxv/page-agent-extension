@@ -959,8 +959,32 @@ export default (
 	 */
 	function isTopElement(element) {
 		// Special case: when viewportExpansion is -1, consider all elements as "top" elements
+		// BUT: If the element is actually in the viewport, we MUST check if it's occluded (e.g. by a modal)
+		// So we only return true early if it's NOT in the viewport.
 		if (viewportExpansion === -1) {
-			return true
+			const rects = getCachedClientRects(element)
+			let isOnScreen = false
+			if (rects && rects.length > 0) {
+				for (const rect of rects) {
+					if (
+						rect.width > 0 &&
+						rect.height > 0 &&
+						rect.bottom > 0 &&
+						rect.top < window.innerHeight &&
+						rect.right > 0 &&
+						rect.left < window.innerWidth
+					) {
+						isOnScreen = true
+						break
+					}
+				}
+			}
+
+			// If strictly off-screen, assume it's fine (since we can't elementFromPoint off-screen)
+			if (!isOnScreen) {
+				return true
+			}
+			// If on-screen, fall through to the strict elementFromPoint check below
 		}
 
 		const rects = getCachedClientRects(element) // Replace element.getClientRects()

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Page Agent",
   "description": "AI-powered GUI agent for web applications - Control web interfaces with natural language",
-  "version": "0.0.21",
+  "version": "0.0.21.3",
   "icons": {
     "16": "assets/icons/icon16.png",
     "48": "assets/icons/icon48.png",

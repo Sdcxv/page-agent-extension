@@ -466,13 +466,19 @@ async function copyLogsForAI() {
         const timestamp = new Date().toISOString()
         const manifest = chrome.runtime.getManifest()
 
+        const hasErrors = targetLogs.some((log: any) => log.level === 'error' || log.level === 'fatal')
+        const reportTitle = hasErrors ? 'Page Agent Error Report' : 'Page Agent Execution Logs'
+        const issueDesc = hasErrors
+            ? 'Please analyze the following logs and identify the root cause of the failure. Pay special attention to the stack traces and error codes.'
+            : 'Here are the execution logs for the recent task.'
+
         const markdown = [
-            '## Page Agent Error Logs Report',
+            `## ${reportTitle}`,
             `**Generated at:** ${timestamp}`,
             `**Extension Version:** ${manifest.version}`,
             '',
-            '### Issue Description',
-            'Please analyze the following logs and identify the root cause of the failure. Pay special attention to the stack traces and error codes.',
+            '### Description',
+            issueDesc,
             '',
             '### Logs',
             '```json',
